@@ -1,10 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { PrismaClient } from '@prisma/client';
-
-const prisma = new PrismaClient();
+import prisma from '../../../lib/prisma';
 
 export async function POST(req: NextRequest) {
   try {
+    // Check if Prisma is properly initialized
+    if (!prisma.score) {
+      return NextResponse.json({ error: 'Database not available' }, { status: 503 });
+    }
+
     // Clear existing data
     await prisma.score.deleteMany();
     await prisma.judge.deleteMany();

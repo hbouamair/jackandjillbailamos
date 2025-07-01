@@ -1,11 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { PrismaClient } from '@prisma/client';
-
-const prisma = new PrismaClient();
+import prisma from '../../../lib/prisma';
 
 // GET /api/admin - Get admin dashboard data
 export async function GET() {
   try {
+    // Check if Prisma is properly initialized
+    if (!prisma.participant) {
+      return NextResponse.json({ error: 'Database not available' }, { status: 503 });
+    }
+
     // Get counts and basic stats
     const participantCount = await prisma.participant.count();
     const judgeCount = await prisma.judge.count();
@@ -118,10 +121,15 @@ export async function GET() {
 
 // POST /api/admin - Admin actions
 export async function POST(req: NextRequest) {
-  const data = await req.json();
-  const { action, ...params } = data;
-  
   try {
+    // Check if Prisma is properly initialized
+    if (!prisma.participant) {
+      return NextResponse.json({ error: 'Database not available' }, { status: 503 });
+    }
+
+    const data = await req.json();
+    const { action, ...params } = data;
+    
     switch (action) {
       case 'generate_heats':
         return await generateHeats();
@@ -139,15 +147,17 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: 'Invalid action' }, { status: 400 });
     }
   } catch (error) {
+    console.error('Admin action error:', error);
     return NextResponse.json({ error: 'Admin action failed' }, { status: 500 });
   }
 }
 
 async function generateHeats() {
-  // Get all participants
-  const participants = await prisma.participant.findMany({
-    orderBy: { number: 'asc' }
-  });
+  try {
+    // Get all participants
+    const participants = await prisma.participant.findMany({
+      orderBy: { number: 'asc' }
+    });
   
   const leaders = participants.filter(p => p.role === 'LEADER');
   const followers = participants.filter(p => p.role === 'FOLLOWER');
@@ -236,37 +246,46 @@ async function generateHeats() {
     message: 'Heats generated successfully with random participant distribution', 
     heats: heats.length 
   });
+  } catch (error) {
+    console.error('Error generating heats:', error);
+    return NextResponse.json({ error: 'Failed to generate heats' }, { status: 500 });
+  }
 }
 
 async function setActiveHeat(heatId: string) {
-  if (!heatId) {
-    return NextResponse.json({ error: 'Heat ID is required' }, { status: 400 });
-  }
-
-  // Verify heat exists
-  const heat = await prisma.heat.findUnique({
-    where: { id: heatId }
-  });
-
-  if (!heat) {
-    return NextResponse.json({ error: 'Heat not found' }, { status: 404 });
-  }
-
-  // Update competition state with active heat
-  await prisma.competitionState.create({
-    data: {
-      currentPhase: 'HEATS',
-      activeHeatId: heatId,
-      semifinalists: '[]',
-      finalists: '[]',
-      winners: '{}'
+  try {
+    if (!heatId) {
+      return NextResponse.json({ error: 'Heat ID is required' }, { status: 400 });
     }
-  });
-  
-  return NextResponse.json({ 
-    message: `Heat ${heat.number} is now active on the dance floor`,
-    activeHeatId: heatId
-  });
+
+    // Verify heat exists
+    const heat = await prisma.heat.findUnique({
+      where: { id: heatId }
+    });
+
+    if (!heat) {
+      return NextResponse.json({ error: 'Heat not found' }, { status: 404 });
+    }
+
+    // Update competition state with active heat
+    await prisma.competitionState.create({
+      data: {
+        currentPhase: 'HEATS',
+        activeHeatId: heatId,
+        semifinalists: '[]',
+        finalists: '[]',
+        winners: '{}'
+      }
+    });
+    
+    return NextResponse.json({ 
+      message: `Heat ${heat.number} is now active on the dance floor`,
+      activeHeatId: heatId
+    });
+  } catch (error) {
+    console.error('Error setting active heat:', error);
+    return NextResponse.json({ error: 'Failed to set active heat' }, { status: 500 });
+  }
 }
 
 async function advanceToSemifinal() {
@@ -559,34 +578,39 @@ async function determineWinners() {
 }
 
 async function resetCompetition() {
-  // Clear all competition data
-  // Delete scores first (they depend on rotations, heats, participants, judges)
-  await prisma.score.deleteMany();
-  // Delete rotations before heats (due to FK)
-  await prisma.rotation.deleteMany();
-  // Delete heat participants before heats (due to FK)
-  await prisma.heatParticipant.deleteMany();
-  // Delete heats
-  await prisma.heat.deleteMany();
-  // Delete competition states
-  await prisma.competitionState.deleteMany();
-  // Delete judges (and their users)
-  await prisma.judge.deleteMany();
-  // Delete participants
-  await prisma.participant.deleteMany();
-  // Delete users except admin and MC
-  await prisma.user.deleteMany({ where: { NOT: [{ username: 'admin' }, { username: 'mc' }] } });
+  try {
+    // Clear all competition data
+    // Delete scores first (they depend on rotations, heats, participants, judges)
+    await prisma.score.deleteMany();
+    // Delete rotations before heats (due to FK)
+    await prisma.rotation.deleteMany();
+    // Delete heat participants before heats (due to FK)
+    await prisma.heatParticipant.deleteMany();
+    // Delete heats
+    await prisma.heat.deleteMany();
+    // Delete competition states
+    await prisma.competitionState.deleteMany();
+    // Delete judges (and their users)
+    await prisma.judge.deleteMany();
+    // Delete participants
+    await prisma.participant.deleteMany();
+    // Delete users except admin and MC
+    await prisma.user.deleteMany({ where: { NOT: [{ username: 'admin' }, { username: 'mc' }] } });
 
-  // Create a new blank competition state
-  await prisma.competitionState.create({
-    data: {
-      currentPhase: 'HEATS',
-      activeHeatId: null,
-      semifinalists: '[]',
-      finalists: '[]',
-      winners: '{}'
-    }
-  });
-  
-  return NextResponse.json({ message: 'Competition reset successfully' });
+    // Create a new blank competition state
+    await prisma.competitionState.create({
+      data: {
+        currentPhase: 'HEATS',
+        activeHeatId: null,
+        semifinalists: '[]',
+        finalists: '[]',
+        winners: '{}'
+      }
+    });
+    
+    return NextResponse.json({ message: 'Competition reset successfully' });
+  } catch (error) {
+    console.error('Error resetting competition:', error);
+    return NextResponse.json({ error: 'Failed to reset competition' }, { status: 500 });
+  }
 } 

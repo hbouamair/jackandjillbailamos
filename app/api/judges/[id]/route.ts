@@ -1,29 +1,37 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { PrismaClient } from '@prisma/client';
-
-const prisma = new PrismaClient();
+import prisma from '../../../../lib/prisma';
 
 // GET /api/judges/[id]
 export async function GET(
   req: NextRequest,
   { params }: { params: { id: string } }
 ) {
-  const { id } = params;
-  const judge = await prisma.judge.findUnique({ 
-    where: { id },
-    include: { user: true }
-  });
-  if (!judge) {
-    return NextResponse.json({ error: 'Judge not found' }, { status: 404 });
+  try {
+    // Check if Prisma is properly initialized
+    if (!prisma.judge) {
+      return NextResponse.json({ error: 'Database not available' }, { status: 503 });
+    }
+
+    const { id } = params;
+    const judge = await prisma.judge.findUnique({ 
+      where: { id },
+      include: { user: true }
+    });
+    if (!judge) {
+      return NextResponse.json({ error: 'Judge not found' }, { status: 404 });
+    }
+    
+    // Convert Prisma enum values back to frontend format
+    const formattedJudge = {
+      ...judge,
+      role: judge.role.toLowerCase() as 'leader' | 'follower'
+    };
+    
+    return NextResponse.json(formattedJudge);
+  } catch (error) {
+    console.error('Error fetching judge:', error);
+    return NextResponse.json({ error: 'Failed to fetch judge' }, { status: 500 });
   }
-  
-  // Convert Prisma enum values back to frontend format
-  const formattedJudge = {
-    ...judge,
-    role: judge.role.toLowerCase() as 'leader' | 'follower'
-  };
-  
-  return NextResponse.json(formattedJudge);
 }
 
 // PUT /api/judges/[id]
@@ -31,10 +39,15 @@ export async function PUT(
   req: NextRequest,
   { params }: { params: { id: string } }
 ) {
-  const { id } = params;
-  const data = await req.json();
-  
   try {
+    // Check if Prisma is properly initialized
+    if (!prisma.judge) {
+      return NextResponse.json({ error: 'Database not available' }, { status: 503 });
+    }
+
+    const { id } = params;
+    const data = await req.json();
+    
     // Get the judge to find the associated user
     const judge = await prisma.judge.findUnique({
       where: { id },
@@ -113,8 +126,14 @@ export async function DELETE(
   req: NextRequest,
   { params }: { params: { id: string } }
 ) {
-  const { id } = params;
   try {
+    // Check if Prisma is properly initialized
+    if (!prisma.judge) {
+      return NextResponse.json({ error: 'Database not available' }, { status: 503 });
+    }
+
+    const { id } = params;
+    
     // Get the judge to find the associated user
     const judge = await prisma.judge.findUnique({
       where: { id },

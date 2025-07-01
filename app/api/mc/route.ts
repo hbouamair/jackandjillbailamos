@@ -1,11 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { PrismaClient } from '@prisma/client';
-
-const prisma = new PrismaClient();
+import prisma from '../../../lib/prisma';
 
 // GET /api/mc - Get MC dashboard data
 export async function GET() {
   try {
+    // Check if Prisma is properly initialized
+    if (!prisma.competitionState) {
+      return NextResponse.json({ error: 'Database not available' }, { status: 503 });
+    }
+
     // Get competition state
     const competitionState = await prisma.competitionState.findFirst({
       orderBy: { createdAt: 'desc' },

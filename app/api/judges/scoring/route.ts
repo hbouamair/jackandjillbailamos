@@ -1,19 +1,22 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { PrismaClient } from '@prisma/client';
-
-const prisma = new PrismaClient();
+import prisma from '../../../../lib/prisma';
 
 // GET /api/judges/scoring - Get scoring data for a judge
 export async function GET(req: NextRequest) {
-  const { searchParams } = new URL(req.url);
-  const userId = searchParams.get('userId');
-  const role = searchParams.get('role');
-  
-  if (!userId || !role) {
-    return NextResponse.json({ error: 'Missing userId or role parameter' }, { status: 400 });
-  }
-  
   try {
+    // Check if Prisma is properly initialized
+    if (!prisma.judge) {
+      return NextResponse.json({ error: 'Database not available' }, { status: 503 });
+    }
+
+    const { searchParams } = new URL(req.url);
+    const userId = searchParams.get('userId');
+    const role = searchParams.get('role');
+    
+    if (!userId || !role) {
+      return NextResponse.json({ error: 'Missing userId or role parameter' }, { status: 400 });
+    }
+    
     // Find the judge by userId
     const judge = await prisma.judge.findUnique({
       where: { userId: userId }
@@ -142,14 +145,19 @@ export async function GET(req: NextRequest) {
 
 // POST /api/judges/scoring - Submit scores
 export async function POST(req: NextRequest) {
-  const data = await req.json();
-  const { userId, scores, phase, heatId } = data;
-  
-  if (!userId || !scores || !Array.isArray(scores)) {
-    return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
-  }
-  
   try {
+    // Check if Prisma is properly initialized
+    if (!prisma.judge) {
+      return NextResponse.json({ error: 'Database not available' }, { status: 503 });
+    }
+
+    const data = await req.json();
+    const { userId, scores, phase, heatId } = data;
+    
+    if (!userId || !scores || !Array.isArray(scores)) {
+      return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
+    }
+    
     // Find the judge by userId
     const judge = await prisma.judge.findUnique({
       where: { userId: userId }

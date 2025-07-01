@@ -1,18 +1,21 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { PrismaClient } from '@prisma/client';
-
-const prisma = new PrismaClient();
+import prisma from '../../../../lib/prisma';
 
 // POST /api/auth/login
 export async function POST(req: NextRequest) {
-  const data = await req.json();
-  const { username, password } = data;
-  
-  if (!username || !password) {
-    return NextResponse.json({ error: 'Missing username or password' }, { status: 400 });
-  }
-  
   try {
+    // Check if Prisma is properly initialized
+    if (!prisma.user) {
+      return NextResponse.json({ error: 'Database not available' }, { status: 503 });
+    }
+
+    const data = await req.json();
+    const { username, password } = data;
+    
+    if (!username || !password) {
+      return NextResponse.json({ error: 'Missing username or password' }, { status: 400 });
+    }
+    
     // Find user by username
     const user = await prisma.user.findUnique({
       where: { username }
