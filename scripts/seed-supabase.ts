@@ -142,12 +142,17 @@ async function main() {
     { name: 'Liam O\'Connor', role: Role.FOLLOWER, number: 12 }
   ];
 
-  for (const participantData of participants) {
-    await prisma.participant.upsert({
-      where: { number: participantData.number },
-      update: {},
-      create: participantData
+  // Check if participants already exist
+  const existingParticipants = await prisma.participant.findMany();
+  
+  if (existingParticipants.length === 0) {
+    // Only create participants if none exist
+    await prisma.participant.createMany({
+      data: participants
     });
+    console.log('✅ Created demo participants');
+  } else {
+    console.log('ℹ️  Participants already exist, skipping creation');
   }
 
   // Create initial competition state

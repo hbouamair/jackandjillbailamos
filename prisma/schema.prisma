@@ -30,7 +30,7 @@ model Participant {
   id     String @id @default(cuid())
   name   String
   role   Role
-  number Int
+  number Int    @unique
   pictureUrl String? // URL to uploaded participant picture
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

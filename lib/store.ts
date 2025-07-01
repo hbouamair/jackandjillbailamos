@@ -29,8 +29,16 @@ class CompetitionStore {
   private semifinalists: Participant[] = [];
   private finalists: Participant[] = [];
   private winners = {
-    leader: null as Participant | null,
-    follower: null as Participant | null
+    leader: {
+      first: null as Participant | null,
+      second: null as Participant | null,
+      third: null as Participant | null
+    },
+    follower: {
+      first: null as Participant | null,
+      second: null as Participant | null,
+      third: null as Participant | null
+    }
   };
 
   // Initialize with persistent storage
@@ -325,8 +333,8 @@ class CompetitionStore {
 
   // Set winners
   setWinners(leader: Participant, follower: Participant) {
-    this.winners.leader = leader;
-    this.winners.follower = follower;
+    this.winners.leader.first = leader;
+    this.winners.follower.first = follower;
   }
 
   // Get competition state
