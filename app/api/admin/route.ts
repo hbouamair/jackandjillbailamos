@@ -4,6 +4,11 @@ import prisma from '../../../lib/prisma';
 // GET /api/admin - Get admin dashboard data
 export async function GET() {
   try {
+    // Check if we're in a build environment
+    if (process.env.NODE_ENV === 'production' && !process.env.DATABASE_URL) {
+      return NextResponse.json({ error: 'Database not available' }, { status: 503 });
+    }
+
     // Check if Prisma is properly initialized
     if (!prisma.participant) {
       return NextResponse.json({ error: 'Database not available' }, { status: 503 });
@@ -122,6 +127,11 @@ export async function GET() {
 // POST /api/admin - Admin actions
 export async function POST(req: NextRequest) {
   try {
+    // Check if we're in a build environment
+    if (process.env.NODE_ENV === 'production' && !process.env.DATABASE_URL) {
+      return NextResponse.json({ error: 'Database not available' }, { status: 503 });
+    }
+
     // Check if Prisma is properly initialized
     if (!prisma.participant) {
       return NextResponse.json({ error: 'Database not available' }, { status: 503 });
