@@ -207,7 +207,18 @@ export const competitionStorage = {
       heats: [],
       semifinalists: [],
       finalists: [],
-      winners: { leader: null, follower: null }
+      winners: {
+        leader: {
+          first: null,
+          second: null,
+          third: null
+        },
+        follower: {
+          first: null,
+          second: null,
+          third: null
+        }
+      }
     };
   },
 
