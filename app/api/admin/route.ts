@@ -5,7 +5,7 @@ import prisma from '../../../lib/prisma';
 export async function GET() {
   try {
     // Check if we're in a build environment
-    if (process.env.NODE_ENV === 'production' && !process.env.DATABASE_URL) {
+    if (process.env.NODE_ENV === 'production' && !process.env.POSTGRES_URL) {
       return NextResponse.json({ error: 'Database not available' }, { status: 503 });
     }
 
@@ -128,7 +128,7 @@ export async function GET() {
 export async function POST(req: NextRequest) {
   try {
     // Check if we're in a build environment
-    if (process.env.NODE_ENV === 'production' && !process.env.DATABASE_URL) {
+    if (process.env.NODE_ENV === 'production' && !process.env.POSTGRES_URL) {
       return NextResponse.json({ error: 'Database not available' }, { status: 503 });
     }
 

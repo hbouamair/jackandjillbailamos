@@ -7,7 +7,7 @@ let prisma: PrismaClient;
 prisma = new PrismaClient({
   datasources: {
     db: {
-      url: process.env.DATABASE_URL || 'postgresql://placeholder:placeholder@localhost:5432/placeholder'
+      url: process.env.POSTGRES_URL || 'postgresql://placeholder:placeholder@localhost:5432/placeholder'
     }
   }
 });

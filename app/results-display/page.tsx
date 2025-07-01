@@ -255,14 +255,14 @@ export default function ResultsDisplay() {
                       </div>
                       
                       {/* Participant Image */}
-                      <div className="relative">
+                    <div className="relative">
                         <div className="w-28 h-28 rounded-full overflow-hidden border-4 border-blue-400/50">
-                          <img
+                        <img
                             src={getParticipantImage(participant || undefined)}
                             alt={participant?.name || 'Participant'}
-                            className="w-full h-full object-cover"
+                          className="w-full h-full object-cover"
                             onError={(e) => handleImageError(e, participant)}
-                          />
+                        />
                         </div>
                         <div className="absolute -top-3 -right-3 w-10 h-10 bg-blue-400 rounded-full flex items-center justify-center text-black font-bold text-base">
                           #{participant?.number}
@@ -297,8 +297,8 @@ export default function ResultsDisplay() {
                       {/* Position Badge */}
                       <div className="w-16 h-16 rounded-full flex items-center justify-center text-2xl font-bold bg-white/20 text-white">
                         {index + 1}
-                      </div>
-                      
+                  </div>
+                  
                       {/* Participant Image */}
                       <div className="relative">
                         <div className="w-28 h-28 rounded-full overflow-hidden border-4 border-pink-400/50">
@@ -322,8 +322,8 @@ export default function ResultsDisplay() {
                     </div>
                   </div>
                 ))}
-              </div>
-            </div>
+                  </div>
+                </div>
           </div>
         </div>
       </div>

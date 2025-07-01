@@ -241,12 +241,12 @@ export default function JudgeDashboard({ user, onLogout }: JudgeDashboardProps) 
                   🔄 Refresh
                 </button>
               )}
-              <button
-                onClick={onLogout}
+            <button
+              onClick={onLogout}
                 className="w-full sm:w-auto px-6 py-3 sm:py-2 bg-white/20 text-white rounded-full hover:bg-white/30 transition-all duration-300 backdrop-blur-sm border border-white/30 text-base sm:text-sm"
-              >
-                Logout
-              </button>
+            >
+              Logout
+            </button>
             </div>
           </div>
         </div>
