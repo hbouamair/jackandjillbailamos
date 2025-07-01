@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import prisma from '../../../../lib/prisma';
+import type { Role } from '@prisma/client';
 
 // GET /api/judges/scoring - Get scoring data for a judge
 export async function GET(req: NextRequest) {
+  const apiStart = Date.now();
   try {
     // Check if Prisma is properly initialized
     if (!prisma.judge) {
@@ -18,29 +20,51 @@ export async function GET(req: NextRequest) {
     }
     
     // Find the judge by userId
+    const judgeStart = Date.now();
     const judge = await prisma.judge.findUnique({
       where: { userId: userId }
     });
+    console.log('Judge fetch:', Date.now() - judgeStart, 'ms');
     
     if (!judge) {
       return NextResponse.json({ error: 'Judge not found' }, { status: 404 });
     }
     
-    // Get competition state
+    // Get competition state (optimized: only select needed fields)
+    const compStateStart = Date.now();
     const competitionState = await prisma.competitionState.findFirst({
       orderBy: { createdAt: 'desc' },
-      include: {
+      select: {
+        currentPhase: true,
+        semifinalists: true,
+        finalists: true,
         activeHeat: {
-          include: {
+          select: {
+            id: true,
+            number: true,
             participants: {
-              include: {
-                participant: true
+              where: {
+                participant: {
+                  role: role.toUpperCase() as Role
+                }
+              },
+              select: {
+                participant: {
+                  select: {
+                    id: true,
+                    name: true,
+                    role: true,
+                    number: true,
+                    pictureUrl: true
+                  }
+                }
               }
             }
           }
         }
       }
     });
+    console.log('Competition state fetch:', Date.now() - compStateStart, 'ms');
     
     const currentPhase = competitionState?.currentPhase.toLowerCase() || 'heats';
     
@@ -48,14 +72,15 @@ export async function GET(req: NextRequest) {
       if (competitionState?.activeHeat) {
         // Active heat exists - show participants from active heat only
         const activeHeat = competitionState.activeHeat;
+        // participantsForJudge: flatten HeatParticipant to Participant (no need to filter by role again)
         const participantsForJudge = activeHeat.participants
-          .filter(hp => hp.participant.role.toLowerCase() === role)
-          .map(hp => ({
+          .map((hp: { participant: { id: string; name: string; role: string; number: number; pictureUrl: string | null } }) => ({
             ...hp.participant,
             role: hp.participant.role.toLowerCase()
           }));
         
-        // Get existing scores for these participants in this heat
+        // Get existing scores for these participants in this heat (optimized: only select participantId)
+        const scoresStart = Date.now();
         const scores = await prisma.score.findMany({
           where: {
             judgeId: judge.id,
@@ -63,17 +88,19 @@ export async function GET(req: NextRequest) {
             participantId: {
               in: participantsForJudge.map(p => p.id)
             }
-          }
+          },
+          select: { participantId: true }
         });
+        console.log('Scores fetch (heats):', Date.now() - scoresStart, 'ms');
         
         // Check if judge has already scored for this heat
         const hasScoredForHeat = scores.length > 0;
         
-        const participantsWithScores = participantsForJudge.map(participant => ({
+        const participantsWithScores = participantsForJudge.map((participant: { id: string }) => ({
           ...participant,
-          scored: scores.some(score => score.participantId === participant.id)
+          scored: scores.some((score: { participantId: string }) => score.participantId === participant.id)
         }));
-        
+        console.log('Total API time:', Date.now() - apiStart, 'ms');
         return NextResponse.json({
           phase: currentPhase,
           activeHeat: {
@@ -87,6 +114,7 @@ export async function GET(req: NextRequest) {
           hasScoredForHeat: hasScoredForHeat
         });
       } else {
+        console.log('Total API time:', Date.now() - apiStart, 'ms');
         // No active heat - show message
         return NextResponse.json({
           phase: currentPhase,
@@ -112,6 +140,7 @@ export async function GET(req: NextRequest) {
       }
       
       // Get existing scores for these participants in this phase
+      const scoresStart = Date.now();
       const scores = await prisma.score.findMany({
         where: {
           judgeId: judge.id,
@@ -119,8 +148,10 @@ export async function GET(req: NextRequest) {
           participantId: {
             in: participants.map((p: any) => p.id)
           }
-        }
+        },
+        select: { participantId: true }
       });
+      console.log('Scores fetch (semifinal/final):', Date.now() - scoresStart, 'ms');
       
       // Check if judge has already scored for this phase
       const hasScoredForPhase = scores.length > 0;
@@ -129,7 +160,7 @@ export async function GET(req: NextRequest) {
         ...participant,
         scored: scores.some(score => score.participantId === participant.id)
       }));
-      
+      console.log('Total API time:', Date.now() - apiStart, 'ms');
       return NextResponse.json({
         phase: currentPhase,
         participants: participantsWithScores,
@@ -139,6 +170,7 @@ export async function GET(req: NextRequest) {
       });
     }
   } catch (error) {
+    console.log('API error, total time:', Date.now() - apiStart, 'ms');
     return NextResponse.json({ error: 'Failed to fetch scoring data' }, { status: 500 });
   }
 }

@@ -21,8 +21,10 @@ export default function JudgeDashboard({ user, onLogout }: JudgeDashboardProps) 
   const [lastRefresh, setLastRefresh] = useState<Date>(new Date());
   const [isUserActive, setIsUserActive] = useState(true);
   const [showRefreshButton, setShowRefreshButton] = useState(false);
+  const [countdown, setCountdown] = useState<number | null>(null);
   const refreshTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const userActivityTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const countdownRef = useRef<NodeJS.Timeout | null>(null);
 
   // Track user activity to pause auto-refresh when they're scoring
   useEffect(() => {
@@ -57,36 +59,28 @@ export default function JudgeDashboard({ user, onLogout }: JudgeDashboardProps) 
     };
   }, []);
 
-  // Smart refresh system
+  // Countdown timer effect
   useEffect(() => {
-    const startRefreshTimer = () => {
-      // Clear existing timeout
-      if (refreshTimeoutRef.current) {
-        clearTimeout(refreshTimeoutRef.current);
-      }
-
-      // Only auto-refresh if user is not active and there's no active heat to score
-      const shouldAutoRefresh = !isUserActive && (!hasActiveHeat || hasScoredForHeat);
-      const refreshInterval = shouldAutoRefresh ? 15000 : 30000; // 15s if inactive, 30s if active
-
-      refreshTimeoutRef.current = setTimeout(() => {
-        // Show refresh button if user is active and we haven't refreshed recently
-        if (isUserActive && !hasActiveHeat) {
-          setShowRefreshButton(true);
-        } else {
-          loadData();
-        }
-      }, refreshInterval);
-    };
-
-    startRefreshTimer();
+    if (countdown !== null && countdown > 0) {
+      countdownRef.current = setTimeout(() => {
+        setCountdown(countdown - 1);
+      }, 1000);
+    } else if (countdown === 0) {
+      // Countdown finished, but don't auto-refresh - just clear the countdown
+      setCountdown(null);
+    }
 
     return () => {
-      if (refreshTimeoutRef.current) {
-        clearTimeout(refreshTimeoutRef.current);
+      if (countdownRef.current) {
+        clearTimeout(countdownRef.current);
       }
     };
-  }, [isUserActive, hasActiveHeat, hasScoredForHeat, lastRefresh]);
+  }, [countdown]);
+
+  // Load initial data when component mounts
+  useEffect(() => {
+    loadData();
+  }, []);
 
   const loadData = async () => {
     setLoading(true);
@@ -176,8 +170,8 @@ export default function JudgeDashboard({ user, onLogout }: JudgeDashboardProps) 
         setMessage(`Scores submitted successfully for ${scoresToSubmit.length} participants!`);
         setScores(new Map());
         setTimeout(() => setMessage(''), 3000);
-        // Reload data to update progress
-        loadData();
+        // Start countdown to refresh page after 10 seconds
+        setCountdown(10);
       } else {
         setMessage(`Error: ${data.error}`);
         setTimeout(() => setMessage(''), 5000);
@@ -252,14 +246,14 @@ export default function JudgeDashboard({ user, onLogout }: JudgeDashboardProps) 
         </div>
       </div>
 
-      {/* Auto-refresh Status */}
+      {/* Status Bar */}
       <div className="relative z-10 bg-white/5 backdrop-blur-lg border-b border-white/10">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-2">
           <div className="flex items-center justify-between text-xs text-white/60">
             <div className="flex items-center space-x-2">
-              <div className={`w-2 h-2 rounded-full ${isUserActive ? 'bg-green-400' : 'bg-yellow-400'}`}></div>
+              <div className="w-2 h-2 rounded-full bg-blue-400"></div>
               <span>
-                {isUserActive ? 'Auto-refresh paused (you are active)' : 'Auto-refresh active'}
+                Manual refresh mode - Use refresh button when needed
               </span>
             </div>
             <div className="text-right">
@@ -308,6 +302,51 @@ export default function JudgeDashboard({ user, onLogout }: JudgeDashboardProps) 
             message.includes('Error') ? 'bg-red-500/20 text-red-200 border border-red-400/30' : 'bg-green-500/20 text-green-200 border border-green-400/30'
           }`}>
             {message}
+          </div>
+        </div>
+      )}
+
+      {/* Countdown Timer */}
+      {countdown !== null && (
+        <div className="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-4">
+          <div className="bg-orange-500/20 backdrop-blur-lg rounded-xl p-4 border border-orange-400/30 text-center">
+            {countdown > 0 ? (
+              <>
+                <div className="text-orange-200 text-lg font-bold mb-2">
+                  ⏰ Scores submitted successfully!
+                </div>
+                <div className="text-orange-200/80 text-sm mb-3">
+                  Countdown: {countdown} seconds
+                </div>
+                <button
+                  onClick={() => {
+                    setCountdown(null);
+                    loadData();
+                  }}
+                  className="px-4 py-2 bg-orange-500/30 text-orange-200 rounded-lg hover:bg-orange-500/40 transition-all duration-300 text-sm"
+                >
+                  Check for Next Heat
+                </button>
+              </>
+            ) : (
+              <>
+                <div className="text-orange-200 text-lg font-bold mb-2">
+                  ✅ Ready for next heat
+                </div>
+                <div className="text-orange-200/80 text-sm mb-3">
+                  Use the refresh button above to check for updates
+                </div>
+                <button
+                  onClick={() => {
+                    setCountdown(null);
+                    loadData();
+                  }}
+                  className="px-4 py-2 bg-orange-500/30 text-orange-200 rounded-lg hover:bg-orange-500/40 transition-all duration-300 text-sm"
+                >
+                  Check for Updates
+                </button>
+              </>
+            )}
           </div>
         </div>
       )}
