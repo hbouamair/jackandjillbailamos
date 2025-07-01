@@ -1,0 +1,187 @@
+import { NextRequest, NextResponse } from 'next/server';
+import { PrismaClient } from '@prisma/client';
+
+const prisma = new PrismaClient();
+
+// GET /api/judges/scoring - Get scoring data for a judge
+export async function GET(req: NextRequest) {
+  const { searchParams } = new URL(req.url);
+  const userId = searchParams.get('userId');
+  const role = searchParams.get('role');
+  
+  if (!userId || !role) {
+    return NextResponse.json({ error: 'Missing userId or role parameter' }, { status: 400 });
+  }
+  
+  try {
+    // Find the judge by userId
+    const judge = await prisma.judge.findUnique({
+      where: { userId: userId }
+    });
+    
+    if (!judge) {
+      return NextResponse.json({ error: 'Judge not found' }, { status: 404 });
+    }
+    
+    // Get competition state
+    const competitionState = await prisma.competitionState.findFirst({
+      orderBy: { createdAt: 'desc' },
+      include: {
+        activeHeat: {
+          include: {
+            participants: {
+              include: {
+                participant: true
+              }
+            }
+          }
+        }
+      }
+    });
+    
+    const currentPhase = competitionState?.currentPhase.toLowerCase() || 'heats';
+    
+    if (currentPhase === 'heats') {
+      if (competitionState?.activeHeat) {
+        // Active heat exists - show participants from active heat only
+        const activeHeat = competitionState.activeHeat;
+        const participantsForJudge = activeHeat.participants
+          .filter(hp => hp.participant.role.toLowerCase() === role)
+          .map(hp => ({
+            ...hp.participant,
+            role: hp.participant.role.toLowerCase()
+          }));
+        
+        // Get existing scores for these participants in this heat
+        const scores = await prisma.score.findMany({
+          where: {
+            judgeId: judge.id,
+            heatId: activeHeat.id,
+            participantId: {
+              in: participantsForJudge.map(p => p.id)
+            }
+          }
+        });
+        
+        // Check if judge has already scored for this heat
+        const hasScoredForHeat = scores.length > 0;
+        
+        const participantsWithScores = participantsForJudge.map(participant => ({
+          ...participant,
+          scored: scores.some(score => score.participantId === participant.id)
+        }));
+        
+        return NextResponse.json({
+          phase: currentPhase,
+          activeHeat: {
+            id: activeHeat.id,
+            number: activeHeat.number,
+            participants: participantsWithScores
+          },
+          judgeRole: role,
+          judgeId: judge!.id,
+          hasActiveHeat: true,
+          hasScoredForHeat: hasScoredForHeat
+        });
+      } else {
+        // No active heat - show message
+        return NextResponse.json({
+          phase: currentPhase,
+          activeHeat: null,
+          judgeRole: role,
+          judgeId: judge.id,
+          hasActiveHeat: false,
+          message: 'No heat is currently active on the dance floor. Please wait for the admin to activate a heat.'
+        });
+      }
+    } else {
+      // For semifinal and final phases
+      let participants: any[] = [];
+      
+      if (currentPhase === 'semifinal') {
+        // Get semifinalists from competition state
+        const semifinalists = JSON.parse(competitionState?.semifinalists || '[]');
+        participants = semifinalists.filter((p: any) => p.role === role);
+      } else if (currentPhase === 'final') {
+        // Get finalists from competition state
+        const finalists = JSON.parse(competitionState?.finalists || '[]');
+        participants = finalists.filter((p: any) => p.role === role);
+      }
+      
+      // Get existing scores for these participants in this phase
+      const scores = await prisma.score.findMany({
+        where: {
+          judgeId: judge.id,
+          phase: competitionState?.currentPhase,
+          participantId: {
+            in: participants.map((p: any) => p.id)
+          }
+        }
+      });
+      
+      // Check if judge has already scored for this phase
+      const hasScoredForPhase = scores.length > 0;
+      
+      const participantsWithScores = participants.map((participant: any) => ({
+        ...participant,
+        scored: scores.some(score => score.participantId === participant.id)
+      }));
+      
+      return NextResponse.json({
+        phase: currentPhase,
+        participants: participantsWithScores,
+        judgeRole: role,
+        judgeId: judge.id,
+        hasScoredForPhase: hasScoredForPhase
+      });
+    }
+  } catch (error) {
+    return NextResponse.json({ error: 'Failed to fetch scoring data' }, { status: 500 });
+  }
+}
+
+// POST /api/judges/scoring - Submit scores
+export async function POST(req: NextRequest) {
+  const data = await req.json();
+  const { userId, scores, phase, heatId } = data;
+  
+  if (!userId || !scores || !Array.isArray(scores)) {
+    return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
+  }
+  
+  try {
+    // Find the judge by userId
+    const judge = await prisma.judge.findUnique({
+      where: { userId: userId }
+    });
+    
+    if (!judge) {
+      return NextResponse.json({ error: 'Judge not found' }, { status: 404 });
+    }
+    
+    // Convert phase to Prisma enum format
+    const prismaPhase = phase.toUpperCase() as 'HEATS' | 'SEMIFINAL' | 'FINAL';
+    
+    // Create score records (one per participant, not per rotation)
+    const scorePromises = scores.map((scoreData: any) => {
+      return prisma.score.create({
+        data: {
+          judgeId: judge.id,
+          participantId: scoreData.participantId,
+          score: scoreData.score,
+          phase: prismaPhase,
+          heatId: heatId || null
+        }
+      });
+    });
+    
+    await Promise.all(scorePromises);
+    
+    return NextResponse.json({ 
+      message: `Scores submitted successfully for ${scores.length} participants`,
+      submitted: scores.length
+    });
+  } catch (error) {
+    return NextResponse.json({ error: 'Failed to submit scores' }, { status: 500 });
+  }
+} 

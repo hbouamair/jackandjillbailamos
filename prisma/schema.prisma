@@ -1,0 +1,165 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id       String   @id @default(cuid())
+  username String   @unique
+  password String
+  type     UserType
+  name     String
+  role     Role?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  judge    Judge?
+
+  @@map("users")
+}
+
+model Participant {
+  id     String @id @default(cuid())
+  name   String
+  role   Role
+  number Int
+  pictureUrl String? // URL to uploaded participant picture
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  scores   Score[]
+  heatParticipants HeatParticipant[]
+
+  @@map("participants")
+}
+
+model Judge {
+  id       String @id @default(cuid())
+  name     String
+  role     Role
+  username String @unique
+  password String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  userId   String @unique
+  user     User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  scores   Score[]
+
+  @@map("judges")
+}
+
+model Heat {
+  id   String @id @default(cuid())
+  number Int
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  participants HeatParticipant[]
+  rotations    Rotation[]
+  scores       Score[]
+  competitionStates CompetitionState[]
+
+  @@map("heats")
+}
+
+model HeatParticipant {
+  id            String @id @default(cuid())
+  heatId        String
+  participantId String
+  createdAt     DateTime @default(now())
+
+  // Relations
+  heat         Heat         @relation(fields: [heatId], references: [id], onDelete: Cascade)
+  participant  Participant  @relation(fields: [participantId], references: [id], onDelete: Cascade)
+
+  @@unique([heatId, participantId])
+  @@map("heat_participants")
+}
+
+model Rotation {
+  id       String @id @default(cuid())
+  number   Int
+  songType SongType
+  duration Int // in seconds
+  heatId   String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  heat   Heat    @relation(fields: [heatId], references: [id], onDelete: Cascade)
+  scores Score[]
+
+  @@map("rotations")
+}
+
+model Score {
+  id            String @id @default(cuid())
+  judgeId       String
+  participantId String
+  rotationId    String?
+  heatId        String?
+  phase         CompetitionPhase
+  score         Int // 1-10
+  timestamp     DateTime @default(now())
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  // Relations
+  judge       Judge       @relation(fields: [judgeId], references: [id], onDelete: Cascade)
+  participant Participant @relation(fields: [participantId], references: [id], onDelete: Cascade)
+  rotation    Rotation?   @relation(fields: [rotationId], references: [id], onDelete: Cascade)
+  heat        Heat?       @relation(fields: [heatId], references: [id], onDelete: Cascade)
+
+  @@map("scores")
+}
+
+model CompetitionState {
+  id            String @id @default(cuid())
+  currentPhase  CompetitionPhase @default(HEATS)
+  activeHeatId  String? // ID of the heat currently on the dance floor
+  semifinalists String // JSON array of participant IDs
+  finalists     String // JSON array of participant IDs
+  winners       String // JSON object with leader and follower IDs
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  // Relations
+  activeHeat    Heat?   @relation(fields: [activeHeatId], references: [id])
+
+  @@map("competition_states")
+}
+
+enum UserType {
+  ADMIN
+  JUDGE
+  MC
+}
+
+enum Role {
+  LEADER
+  FOLLOWER
+}
+
+enum SongType {
+  URBAN
+  SENSUAL
+  TRADITIONAL
+}
+
+enum CompetitionPhase {
+  HEATS
+  SEMIFINAL
+  FINAL
+} 
