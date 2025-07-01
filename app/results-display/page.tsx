@@ -538,9 +538,9 @@ export default function ResultsDisplay() {
               <h2 className="text-4xl font-bold text-blue-400 mb-6">🕺 Leaders</h2>
               <div className="space-y-6">
                 {[
-                  { participant: getParticipantById(winners.leader?.first || ''), place: 1, medal: '🥇', color: 'from-yellow-400 to-amber-400' },
-                  { participant: getParticipantById(winners.leader?.second || ''), place: 2, medal: '🥈', color: 'from-gray-300 to-gray-400' },
-                  { participant: getParticipantById(winners.leader?.third || ''), place: 3, medal: '🥉', color: 'from-amber-600 to-orange-600' }
+                  { participant: winners.leader?.first, place: 1, medal: '🥇', color: 'from-yellow-400 to-amber-400' },
+                  { participant: winners.leader?.second, place: 2, medal: '🥈', color: 'from-gray-300 to-gray-400' },
+                  { participant: winners.leader?.third, place: 3, medal: '🥉', color: 'from-amber-600 to-orange-600' }
                 ].filter(({ participant }) => participant).map(({ participant, place, medal, color }) => (
                   <div key={participant?.id} className="bg-white/10 backdrop-blur-lg rounded-2xl p-6 border border-white/20 hover:bg-white/15 transition-all duration-300 transform hover:scale-105">
                     <div className="flex items-center space-x-6">
@@ -570,9 +570,9 @@ export default function ResultsDisplay() {
               <h2 className="text-4xl font-bold text-pink-400 mb-6">💃 Followers</h2>
               <div className="space-y-6">
                 {[
-                  { participant: getParticipantById(winners.follower?.first || ''), place: 1, medal: '🥇', color: 'from-yellow-400 to-amber-400' },
-                  { participant: getParticipantById(winners.follower?.second || ''), place: 2, medal: '🥈', color: 'from-gray-300 to-gray-400' },
-                  { participant: getParticipantById(winners.follower?.third || ''), place: 3, medal: '🥉', color: 'from-amber-600 to-orange-600' }
+                  { participant: winners.follower?.first, place: 1, medal: '🥇', color: 'from-yellow-400 to-amber-400' },
+                  { participant: winners.follower?.second, place: 2, medal: '🥈', color: 'from-gray-300 to-gray-400' },
+                  { participant: winners.follower?.third, place: 3, medal: '🥉', color: 'from-amber-600 to-orange-600' }
                 ].filter(({ participant }) => participant).map(({ participant, place, medal, color }) => (
                   <div key={participant?.id} className="bg-white/10 backdrop-blur-lg rounded-2xl p-6 border border-white/20 hover:bg-white/15 transition-all duration-300 transform hover:scale-105">
                     <div className="flex items-center space-x-6">
