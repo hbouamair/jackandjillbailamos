@@ -4,6 +4,12 @@ import prisma from '../../../../lib/prisma';
 // POST /api/auth/login
 export async function POST(req: NextRequest) {
   try {
+    // Check if database URL is available
+    if (!process.env.POSTGRES_URL) {
+      console.error('POSTGRES_URL environment variable is not set');
+      return NextResponse.json({ error: 'Database configuration error' }, { status: 503 });
+    }
+
     // Check if Prisma is properly initialized
     if (!prisma.user) {
       return NextResponse.json({ error: 'Database not available' }, { status: 503 });

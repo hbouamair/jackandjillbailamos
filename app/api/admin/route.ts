@@ -4,6 +4,12 @@ import prisma from '../../../lib/prisma';
 // GET /api/admin - Get admin dashboard data
 export async function GET() {
   try {
+    // Check if database URL is available
+    if (!process.env.POSTGRES_URL) {
+      console.error('POSTGRES_URL environment variable is not set');
+      return NextResponse.json({ error: 'Database configuration error' }, { status: 503 });
+    }
+
     // Check if we're in a build environment
     if (process.env.NODE_ENV === 'production' && !process.env.POSTGRES_URL) {
       return NextResponse.json({ error: 'Database not available' }, { status: 503 });
@@ -127,6 +133,12 @@ export async function GET() {
 // POST /api/admin - Admin actions
 export async function POST(req: NextRequest) {
   try {
+    // Check if database URL is available
+    if (!process.env.POSTGRES_URL) {
+      console.error('POSTGRES_URL environment variable is not set');
+      return NextResponse.json({ error: 'Database configuration error' }, { status: 503 });
+    }
+
     // Check if we're in a build environment
     if (process.env.NODE_ENV === 'production' && !process.env.POSTGRES_URL) {
       return NextResponse.json({ error: 'Database not available' }, { status: 503 });
