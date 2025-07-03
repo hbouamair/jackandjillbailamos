@@ -125,8 +125,9 @@ model Score {
 }
 
 model CompetitionState {
-  id            String @id @default(cuid())
+  id            String   @id @default(cuid())
   currentPhase  CompetitionPhase @default(HEATS)
+  category      CompetitionCategory @default(AMATEUR)
   activeHeatId  String? // ID of the heat currently on the dance floor
   semifinalists String // JSON array of participant IDs
   finalists     String // JSON array of participant IDs
@@ -161,4 +162,9 @@ enum CompetitionPhase {
   HEATS
   SEMIFINAL
   FINAL
+}
+
+enum CompetitionCategory {
+  AMATEUR
+  PRO
 } 
