@@ -28,21 +28,29 @@ export async function GET(req: NextRequest) {
     
     // Get the current competition state to determine the judge category
     const currentState = await prisma.competitionState.findFirst({
-      orderBy: { createdAt: 'desc' },
-      select: { category: true }
+      orderBy: { createdAt: 'desc' }
     });
     
-    const category = currentState?.category || 'AMATEUR';
+    const category = 'AMATEUR'; // Default to AMATEUR for now
     
-    // Get competition state (filtered by category)
+    // Get competition state
     const competitionState = await prisma.competitionState.findFirst({
-      where: { category },
       orderBy: { createdAt: 'desc' },
       select: {
         currentPhase: true,
         semifinalists: true,
         finalists: true,
-        activeHeat: {
+        activeHeatId: true
+      }
+    });
+    
+    const currentPhase = competitionState?.currentPhase.toLowerCase() || 'heats';
+    
+    if (currentPhase === 'heats') {
+      if (competitionState?.activeHeatId) {
+        // Active heat exists - get the active heat with participants
+        const activeHeat = await prisma.heat.findUnique({
+          where: { id: competitionState.activeHeatId },
           select: {
             id: true,
             number: true,
@@ -60,57 +68,61 @@ export async function GET(req: NextRequest) {
               }
             }
           }
-        }
-      }
-    });
-    
-    const currentPhase = competitionState?.currentPhase.toLowerCase() || 'heats';
-    
-    if (currentPhase === 'heats') {
-      if (competitionState?.activeHeat) {
-        // Active heat exists - show participants from active heat only
-        const activeHeat = competitionState.activeHeat;
-        // participantsForJudge: flatten HeatParticipant to Participant and filter by role
-        const participantsForJudge = activeHeat.participants
-          .map((hp: { participant: { id: string; name: string; role: string; number: number; pictureUrl: string | null } }) => hp.participant)
-          .filter((p: { role: string }) => p.role.toLowerCase() === role)
-          .map((p: { role: string }) => ({
-            ...p,
-            role: p.role.toLowerCase()
+        });
+        
+        if (activeHeat) {
+          // participantsForJudge: flatten HeatParticipant to Participant and filter by role
+          const participantsForJudge = activeHeat.participants
+            .map((hp: { participant: { id: string; name: string; role: string; number: number; pictureUrl: string | null } }) => hp.participant)
+            .filter((p: { role: string }) => p.role.toLowerCase() === role)
+            .map((p: { id: string; name: string; role: string; number: number; pictureUrl: string | null }) => ({
+              ...p,
+              role: p.role.toLowerCase()
+            }));
+          
+          // Get existing scores for these participants in this heat (optimized: only select participantId)
+          const scores = await prisma.score.findMany({
+            where: {
+              judgeId: judge.id,
+              heatId: activeHeat.id,
+              participantId: {
+                in: participantsForJudge.map((p) => p.id)
+              }
+            },
+            select: { participantId: true }
+          });
+          
+          // Check if judge has already scored for this heat
+          const hasScoredForHeat = scores.length > 0;
+          
+          const participantsWithScores = participantsForJudge.map((participant) => ({
+            ...participant,
+            scored: scores.some((score: { participantId: string }) => score.participantId === participant.id)
           }));
-        
-        // Get existing scores for these participants in this heat (optimized: only select participantId)
-        const scores = await prisma.score.findMany({
-          where: {
+          
+          return NextResponse.json({
+            phase: currentPhase,
+            activeHeat: {
+              id: activeHeat.id,
+              number: activeHeat.number,
+              participants: participantsWithScores
+            },
+            judgeRole: role,
+            judgeId: judge!.id,
+            hasActiveHeat: true,
+            hasScoredForHeat: hasScoredForHeat
+          });
+        } else {
+          // No active heat - show message
+          return NextResponse.json({
+            phase: currentPhase,
+            activeHeat: null,
+            judgeRole: role,
             judgeId: judge.id,
-            heatId: activeHeat.id,
-            participantId: {
-              in: participantsForJudge.map((p: { id: string }) => p.id)
-            }
-          },
-          select: { participantId: true }
-        });
-        
-        // Check if judge has already scored for this heat
-        const hasScoredForHeat = scores.length > 0;
-        
-        const participantsWithScores = participantsForJudge.map((participant: { id: string }) => ({
-          ...participant,
-          scored: scores.some((score: { participantId: string }) => score.participantId === participant.id)
-        }));
-        
-        return NextResponse.json({
-          phase: currentPhase,
-          activeHeat: {
-            id: activeHeat.id,
-            number: activeHeat.number,
-            participants: participantsWithScores
-          },
-          judgeRole: role,
-          judgeId: judge!.id,
-          hasActiveHeat: true,
-          hasScoredForHeat: hasScoredForHeat
-        });
+            hasActiveHeat: false,
+            message: 'No heat is currently active on the dance floor. Please wait for the admin to activate a heat.'
+          });
+        }
       } else {
         // No active heat - show message
         return NextResponse.json({
