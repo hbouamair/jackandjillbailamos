@@ -7,7 +7,7 @@ let prisma: PrismaClient;
 prisma = new PrismaClient({
   datasources: {
     db: {
-      url: process.env.POSTGRES_URL || 'postgres://postgres.rxrznqxcqfgoaqadnyqa:zp1tYA6bRnkzGe6P@aws-0-us-east-1.pooler.supabase.com:6543/postgres?sslmode=require&supa=base-pooler.x'
+      url: process.env.POSTGRES_URL || 'postgres://postgres.rxrznqxcqfgoaqadnyqa:zp1tYA6bRnkzGe6P@aws-0-us-east-1.pooler.supabase.com:5432/postgres?sslmode=require&supa=base-pooler.x?pgbouncer=true'
     }
   }
 });
