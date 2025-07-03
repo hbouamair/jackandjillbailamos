@@ -389,12 +389,12 @@ async function advanceToSemifinal(category: 'AMATEUR' | 'PRO' = 'AMATEUR') {
 
     // Get top 8 leaders and top 8 followers by SUM of scores
     const leaders = allParticipants
-      .filter(p => (p.role === 'LEADER' || p.role === 'leader'))
+      .filter(p => p.role === 'LEADER')
       .sort((a, b) => (participantScores.get(b.id) || 0) - (participantScores.get(a.id) || 0))
       .slice(0, 8);
 
     const followers = allParticipants
-      .filter(p => (p.role === 'FOLLOWER' || p.role === 'follower'))
+      .filter(p => p.role === 'FOLLOWER')
       .sort((a, b) => (participantScores.get(b.id) || 0) - (participantScores.get(a.id) || 0))
       .slice(0, 8);
 
@@ -467,12 +467,12 @@ async function advanceToFinal() {
 
     // Get top 5 leaders and top 5 followers by SUM of scores
     const leaders = semifinalists
-      .filter((p: any) => (p.role === 'leader' || p.role === 'LEADER'))
+      .filter((p: any) => p.role === 'leader')
       .sort((a: any, b: any) => (participantScores.get(b.id) || 0) - (participantScores.get(a.id) || 0))
       .slice(0, 5);
 
     const followers = semifinalists
-      .filter((p: any) => (p.role === 'follower' || p.role === 'FOLLOWER'))
+      .filter((p: any) => p.role === 'follower')
       .sort((a: any, b: any) => (participantScores.get(b.id) || 0) - (participantScores.get(a.id) || 0))
       .slice(0, 5);
 
@@ -551,12 +551,12 @@ async function determineWinners() {
 
     // Get top 3 leaders and top 3 followers by SUM of scores
     const leaders = finalists
-      .filter((p: any) => (p.role === 'leader' || p.role === 'LEADER'))
+      .filter((p: any) => p.role === 'leader')
       .sort((a: any, b: any) => (participantScores.get(b.id) || 0) - (participantScores.get(a.id) || 0))
       .slice(0, 3);
 
     const followers = finalists
-      .filter((p: any) => (p.role === 'follower' || p.role === 'FOLLOWER'))
+      .filter((p: any) => p.role === 'follower')
       .sort((a: any, b: any) => (participantScores.get(b.id) || 0) - (participantScores.get(a.id) || 0))
       .slice(0, 3);
 
