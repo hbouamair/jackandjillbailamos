@@ -68,28 +68,56 @@ export async function GET() {
       orderBy: { number: 'asc' }
     });
 
+    // Get all judges for scoring status
+    const allJudges = await prisma.judge.findMany({
+      orderBy: { name: 'asc' }
+    });
+
+    // Calculate judge scoring status for active heat
+    let judgeScoringStatus = null;
+    if (competitionState?.activeHeatId) {
+      const activeHeat = heats.find(h => h.id === competitionState.activeHeatId);
+      if (activeHeat) {
+        const scoredJudgeIds = new Set(activeHeat.scores.map(s => s.judgeId));
+        judgeScoringStatus = {
+          heatNumber: activeHeat.number,
+          totalJudges: allJudges.length,
+          scoredJudges: allJudges.filter(j => scoredJudgeIds.has(j.id)).map(j => ({
+            id: j.id,
+            name: j.name,
+            role: j.role.toLowerCase()
+          })),
+          pendingJudges: allJudges.filter(j => !scoredJudgeIds.has(j.id)).map(j => ({
+            id: j.id,
+            name: j.name,
+            role: j.role.toLowerCase()
+          })),
+          totalScores: activeHeat.scores.length,
+          expectedScores: allJudges.length * activeHeat.participants.length
+        };
+      }
+    }
+
     // Calculate results for each heat
     const heatResults = heats.map(heat => {
       const participants = heat.participants.map(hp => hp.participant);
       const scores = heat.scores;
       
-      // Calculate average scores for each participant
+      // Calculate total scores for each participant (sum, not average)
       const participantScores = participants.map(participant => {
         const participantScores = scores.filter(s => s.participantId === participant.id);
-        const averageScore = participantScores.length > 0 
-          ? participantScores.reduce((sum, s) => sum + s.score, 0) / participantScores.length 
-          : 0;
+        const totalScore = participantScores.reduce((sum, s) => sum + s.score, 0);
         
         return {
           ...participant,
           role: participant.role.toLowerCase(),
-          averageScore: Math.round(averageScore * 10) / 10,
+          totalScore: totalScore,
           totalScores: participantScores.length
         };
       });
 
-      // Sort by average score (highest first)
-      participantScores.sort((a, b) => b.averageScore - a.averageScore);
+      // Sort by total score (highest first)
+      participantScores.sort((a, b) => b.totalScore - a.totalScore);
 
       return {
         id: heat.id,
@@ -110,6 +138,7 @@ export async function GET() {
       },
       competitionState: competitionState ? {
         currentPhase: competitionState.currentPhase.toLowerCase(),
+        category: competitionState.category,
         activeHeatId: competitionState.activeHeatId,
         activeHeat: competitionState.activeHeat ? {
           id: competitionState.activeHeat.id,
@@ -123,6 +152,7 @@ export async function GET() {
         finalists: JSON.parse(competitionState.finalists),
         winners: JSON.parse(competitionState.winners)
       } : null,
+      judgeScoringStatus,
       heatResults
     });
   } catch (error) {
@@ -150,21 +180,23 @@ export async function POST(req: NextRequest) {
     }
 
     const data = await req.json();
-    const { action, ...params } = data;
+    const { action, category, ...params } = data;
     
     switch (action) {
       case 'generate_heats':
-        return await generateHeats();
+        return await generateHeats(category);
       case 'set_active_heat':
-        return await setActiveHeat(params.heatId);
+        return await setActiveHeat(params.heatId, category);
       case 'advance_semifinal':
-        return await advanceToSemifinal();
+        return await advanceToSemifinal(category);
       case 'advance_final':
         return await advanceToFinal();
       case 'determine_winners':
         return await determineWinners();
       case 'reset_competition':
         return await resetCompetition();
+      case 'set_judge_category':
+        return await setJudgeCategory(category);
       default:
         return NextResponse.json({ error: 'Invalid action' }, { status: 400 });
     }
@@ -174,7 +206,7 @@ export async function POST(req: NextRequest) {
   }
 }
 
-async function generateHeats() {
+async function generateHeats(category: 'AMATEUR' | 'PRO' = 'AMATEUR') {
   try {
     // Get all participants
     const participants = await prisma.participant.findMany({
@@ -191,18 +223,25 @@ async function generateHeats() {
     }, { status: 400 });
   }
   
-  // Calculate optimal number of heats
-  // Target: 4-6 participants per heat (2-3 couples)
-  const totalParticipants = leaders.length + followers.length;
-  const participantsPerHeat = 6; // Target 6 participants per heat (3 couples)
-  const numberOfHeats = Math.ceil(totalParticipants / participantsPerHeat);
+  // Calculate total couples (minimum of leaders and followers)
+  const totalCouples = Math.min(leaders.length, followers.length);
   
-  // Ensure we have at least 2 heats for a proper competition
-  const finalNumberOfHeats = Math.max(2, numberOfHeats);
+  // Determine number of heats based on total couples
+  let numberOfHeats;
+  if (totalCouples <= 14) {
+    // For 14 or fewer couples, use 1 heat
+    numberOfHeats = 1;
+  } else if (totalCouples >= 15 && totalCouples <= 18) {
+    // For 15-18 couples, split into 2 heats
+    numberOfHeats = 2;
+  } else {
+    // For more than 18 couples, split into 3 heats
+    numberOfHeats = 3;
+  }
   
-  // Calculate participants per heat
-  const leadersPerHeat = Math.ceil(leaders.length / finalNumberOfHeats);
-  const followersPerHeat = Math.ceil(followers.length / finalNumberOfHeats);
+  // Calculate participants per heat for balanced distribution
+  const leadersPerHeat = Math.ceil(leaders.length / numberOfHeats);
+  const followersPerHeat = Math.ceil(followers.length / numberOfHeats);
   
   // Clear existing heats
   await prisma.heat.deleteMany();
@@ -213,7 +252,7 @@ async function generateHeats() {
   
   // Create heats dynamically
   const heats = [];
-  for (let i = 1; i <= finalNumberOfHeats; i++) {
+  for (let i = 1; i <= numberOfHeats; i++) {
     const heat = await prisma.heat.create({
       data: { number: i }
     });
@@ -258,6 +297,7 @@ async function generateHeats() {
   await prisma.competitionState.create({
     data: {
       currentPhase: 'HEATS',
+      category: category,
       semifinalists: '[]',
       finalists: '[]',
       winners: '{}'
@@ -265,8 +305,9 @@ async function generateHeats() {
   });
   
   return NextResponse.json({ 
-    message: 'Heats generated successfully with random participant distribution', 
-    heats: heats.length 
+    message: `Heats generated successfully! Created ${numberOfHeats} heat(s) for ${totalCouples} couples with random participant distribution.`, 
+    heats: heats.length,
+    totalCouples: totalCouples
   });
   } catch (error) {
     console.error('Error generating heats:', error);
@@ -274,7 +315,7 @@ async function generateHeats() {
   }
 }
 
-async function setActiveHeat(heatId: string) {
+async function setActiveHeat(heatId: string, category: 'AMATEUR' | 'PRO' = 'AMATEUR') {
   try {
     if (!heatId) {
       return NextResponse.json({ error: 'Heat ID is required' }, { status: 400 });
@@ -294,6 +335,7 @@ async function setActiveHeat(heatId: string) {
       data: {
         currentPhase: 'HEATS',
         activeHeatId: heatId,
+        category: category,
         semifinalists: '[]',
         finalists: '[]',
         winners: '{}'
@@ -310,7 +352,7 @@ async function setActiveHeat(heatId: string) {
   }
 }
 
-async function advanceToSemifinal() {
+async function advanceToSemifinal(category: 'AMATEUR' | 'PRO' = 'AMATEUR') {
   try {
     // Get all heats with their scores
     const heats = await prisma.heat.findMany({
@@ -330,51 +372,40 @@ async function advanceToSemifinal() {
 
     // Calculate total scores for each participant across all heats
     const participantScores = new Map<string, number>();
-    const participantCounts = new Map<string, number>();
 
     // Initialize all participants with 0 scores
     const allParticipants = await prisma.participant.findMany();
     allParticipants.forEach(p => {
       participantScores.set(p.id, 0);
-      participantCounts.set(p.id, 0);
     });
 
     // Sum up all scores for each participant
     heats.forEach(heat => {
       heat.scores.forEach(score => {
         const currentScore = participantScores.get(score.participantId) || 0;
-        const currentCount = participantCounts.get(score.participantId) || 0;
         participantScores.set(score.participantId, currentScore + score.score);
-        participantCounts.set(score.participantId, currentCount + 1);
       });
     });
 
-    // Calculate average scores for each participant
-    const participantAverages = new Map<string, number>();
-    participantScores.forEach((totalScore, participantId) => {
-      const count = participantCounts.get(participantId) || 1;
-      const averageScore = totalScore / count;
-      participantAverages.set(participantId, averageScore);
-    });
-
-    // Get top 8 leaders and top 8 followers
+    // Get top 8 leaders and top 8 followers by SUM of scores
     const leaders = allParticipants
-      .filter(p => p.role === 'LEADER')
-      .sort((a, b) => (participantAverages.get(b.id) || 0) - (participantAverages.get(a.id) || 0))
+      .filter(p => (p.role === 'LEADER' || p.role === 'leader'))
+      .sort((a, b) => (participantScores.get(b.id) || 0) - (participantScores.get(a.id) || 0))
       .slice(0, 8);
 
     const followers = allParticipants
-      .filter(p => p.role === 'FOLLOWER')
-      .sort((a, b) => (participantAverages.get(b.id) || 0) - (participantAverages.get(a.id) || 0))
+      .filter(p => (p.role === 'FOLLOWER' || p.role === 'follower'))
+      .sort((a, b) => (participantScores.get(b.id) || 0) - (participantScores.get(a.id) || 0))
       .slice(0, 8);
 
     const semifinalists = [...leaders, ...followers];
 
     // Update competition state
-  await prisma.competitionState.create({
-    data: {
-      currentPhase: 'SEMIFINAL',
+    await prisma.competitionState.create({
+      data: {
+        currentPhase: 'SEMIFINAL',
         activeHeatId: null, // Clear active heat
+        category: category,
         semifinalists: JSON.stringify(semifinalists.map(p => ({
           id: p.id,
           name: p.name,
@@ -382,11 +413,11 @@ async function advanceToSemifinal() {
           role: p.role.toLowerCase(),
           pictureUrl: p.pictureUrl
         }))),
-      finalists: '[]',
-      winners: '{}'
-    }
-  });
-  
+        finalists: '[]',
+        winners: '{}'
+      }
+    });
+    
     return NextResponse.json({ 
       message: `Advanced to semifinal with ${leaders.length} leaders and ${followers.length} followers`,
       semifinalists: semifinalists.length
@@ -422,39 +453,27 @@ async function advanceToFinal() {
       }
     });
 
-    // Calculate average scores for each semifinalist
+    // Calculate total scores for each semifinalist
     const participantScores = new Map<string, number>();
-    const participantCounts = new Map<string, number>();
 
     semifinalists.forEach((p: any) => {
       participantScores.set(p.id, 0);
-      participantCounts.set(p.id, 0);
     });
 
     semifinalScores.forEach(score => {
       const currentScore = participantScores.get(score.participantId) || 0;
-      const currentCount = participantCounts.get(score.participantId) || 0;
       participantScores.set(score.participantId, currentScore + score.score);
-      participantCounts.set(score.participantId, currentCount + 1);
     });
 
-    // Calculate average scores
-    const participantAverages = new Map<string, number>();
-    participantScores.forEach((totalScore, participantId) => {
-      const count = participantCounts.get(participantId) || 1;
-      const averageScore = totalScore / count;
-      participantAverages.set(participantId, averageScore);
-    });
-
-    // Get top 5 leaders and top 5 followers
+    // Get top 5 leaders and top 5 followers by SUM of scores
     const leaders = semifinalists
-      .filter((p: any) => p.role === 'leader')
-      .sort((a: any, b: any) => (participantAverages.get(b.id) || 0) - (participantAverages.get(a.id) || 0))
+      .filter((p: any) => (p.role === 'leader' || p.role === 'LEADER'))
+      .sort((a: any, b: any) => (participantScores.get(b.id) || 0) - (participantScores.get(a.id) || 0))
       .slice(0, 5);
 
     const followers = semifinalists
-      .filter((p: any) => p.role === 'follower')
-      .sort((a: any, b: any) => (participantAverages.get(b.id) || 0) - (participantAverages.get(a.id) || 0))
+      .filter((p: any) => (p.role === 'follower' || p.role === 'FOLLOWER'))
+      .sort((a: any, b: any) => (participantScores.get(b.id) || 0) - (participantScores.get(a.id) || 0))
       .slice(0, 5);
 
     const finalists = [...leaders, ...followers];
@@ -467,9 +486,9 @@ async function advanceToFinal() {
     });
 
     // Update competition state
-  await prisma.competitionState.create({
-    data: {
-      currentPhase: 'FINAL',
+    await prisma.competitionState.create({
+      data: {
+        currentPhase: 'FINAL',
         activeHeatId: null,
         semifinalists: currentState.semifinalists,
         finalists: JSON.stringify(finalists.map(p => ({
@@ -479,10 +498,10 @@ async function advanceToFinal() {
           role: p.role,
           pictureUrl: p.pictureUrl
         }))),
-      winners: '{}'
-    }
-  });
-  
+        winners: '{}'
+      }
+    });
+    
     return NextResponse.json({ 
       message: `Advanced to final with ${leaders.length} leaders and ${followers.length} followers. Judges can now score the finalists to determine the 3 winners.`,
       finalists: finalists.length
@@ -518,39 +537,27 @@ async function determineWinners() {
       }
     });
 
-    // Calculate average scores for each finalist
+    // Calculate total scores for each finalist
     const participantScores = new Map<string, number>();
-    const participantCounts = new Map<string, number>();
 
     finalists.forEach((p: any) => {
       participantScores.set(p.id, 0);
-      participantCounts.set(p.id, 0);
     });
 
     finalScores.forEach(score => {
       const currentScore = participantScores.get(score.participantId) || 0;
-      const currentCount = participantCounts.get(score.participantId) || 0;
       participantScores.set(score.participantId, currentScore + score.score);
-      participantCounts.set(score.participantId, currentCount + 1);
     });
 
-    // Calculate average scores
-    const participantAverages = new Map<string, number>();
-    participantScores.forEach((totalScore, participantId) => {
-      const count = participantCounts.get(participantId) || 1;
-      const averageScore = totalScore / count;
-      participantAverages.set(participantId, averageScore);
-    });
-
-    // Get top 3 leaders and top 3 followers
+    // Get top 3 leaders and top 3 followers by SUM of scores
     const leaders = finalists
-      .filter((p: any) => p.role === 'leader')
-      .sort((a: any, b: any) => (participantAverages.get(b.id) || 0) - (participantAverages.get(a.id) || 0))
+      .filter((p: any) => (p.role === 'leader' || p.role === 'LEADER'))
+      .sort((a: any, b: any) => (participantScores.get(b.id) || 0) - (participantScores.get(a.id) || 0))
       .slice(0, 3);
 
     const followers = finalists
-      .filter((p: any) => p.role === 'follower')
-      .sort((a: any, b: any) => (participantAverages.get(b.id) || 0) - (participantAverages.get(a.id) || 0))
+      .filter((p: any) => (p.role === 'follower' || p.role === 'FOLLOWER'))
+      .sort((a: any, b: any) => (participantScores.get(b.id) || 0) - (participantScores.get(a.id) || 0))
       .slice(0, 3);
 
     const winners = {
@@ -635,4 +642,42 @@ async function resetCompetition() {
     console.error('Error resetting competition:', error);
     return NextResponse.json({ error: 'Failed to reset competition' }, { status: 500 });
   }
-} 
+}
+
+async function setJudgeCategory(category: 'AMATEUR' | 'PRO' = 'AMATEUR') {
+  try {
+    // Store the judge category in a configuration table or environment variable
+    // For now, we'll store it in the competition state as a configuration
+    const currentState = await prisma.competitionState.findFirst({
+      orderBy: { createdAt: 'desc' }
+    });
+
+    if (currentState) {
+      // Update the current competition state with the judge category
+      await prisma.competitionState.update({
+        where: { id: currentState.id },
+        data: { category: category }
+      });
+    } else {
+      // Create a new competition state with the judge category
+      await prisma.competitionState.create({
+        data: {
+          currentPhase: 'HEATS',
+          activeHeatId: null,
+          semifinalists: '[]',
+          finalists: '[]',
+          winners: '{}',
+          category: category
+        }
+      });
+    }
+    
+    return NextResponse.json({ 
+      message: `Judge category set to ${category}. Judges will now see ${category.toLowerCase()} competition heats.`,
+      category: category
+    });
+  } catch (error) {
+    console.error('Error setting judge category:', error);
+    return NextResponse.json({ error: 'Failed to set judge category' }, { status: 500 });
+  }
+}

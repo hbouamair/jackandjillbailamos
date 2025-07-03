@@ -19,7 +19,6 @@ export default function Home() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(true);
-
   // Handle initial load and localStorage
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -72,6 +71,8 @@ export default function Home() {
     // Remove user from localStorage
     localStorage.removeItem('currentUser');
   };
+
+
 
   if (isLoading) {
     return (
@@ -146,7 +147,7 @@ export default function Home() {
             Jack & Jill - Marrakech Festival
           </p>
         </div>
-
+        
         <div className="bg-white/10 backdrop-blur-lg rounded-3xl shadow-2xl p-8 border border-white/20">
           <form onSubmit={handleLogin} className="space-y-6">
             <div>
@@ -163,7 +164,7 @@ export default function Home() {
                 required
               />
             </div>
-
+            
             <div>
               <label htmlFor="password" className="block text-sm font-medium text-white/90 mb-2">
                 Password
@@ -193,27 +194,9 @@ export default function Home() {
             </button>
           </form>
 
-          <div className="mt-8 p-6 bg-white/5 rounded-2xl border border-white/10">
-            <h3 className="text-lg font-semibold text-white mb-4 text-center">Demo Credentials</h3>
-            <div className="space-y-2 text-sm">
-              <div className="flex items-center justify-between p-2 bg-white/10 rounded-lg">
-                <span className="text-white/80">Admin:</span>
-                <span className="text-yellow-300 font-mono">admin / admin123</span>
-              </div>
-              <div className="flex items-center justify-between p-2 bg-white/10 rounded-lg">
-                <span className="text-white/80">MC:</span>
-                <span className="text-yellow-300 font-mono">mc / mc123</span>
-              </div>
-              <div className="flex items-center justify-between p-2 bg-white/10 rounded-lg">
-                <span className="text-white/80">Leader Judges:</span>
-                <span className="text-yellow-300 font-mono">judge1 / judge123</span>
-              </div>
-              <div className="flex items-center justify-between p-2 bg-white/10 rounded-lg">
-                <span className="text-white/80">Follower Judges:</span>
-                <span className="text-yellow-300 font-mono">judge3 / judge123</span>
-              </div>
-            </div>
-          </div>
+
+
+
         </div>
       </div>
 

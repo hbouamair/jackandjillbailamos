@@ -8,6 +8,15 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Database not available' }, { status: 503 });
     }
 
+    // Check if there are existing participants
+    const existingParticipants = await prisma.participant.count();
+    if (existingParticipants > 0) {
+      return NextResponse.json({ 
+        success: false, 
+        error: 'Demo data cannot be created when participants already exist. Please reset the competition first.' 
+      }, { status: 400 });
+    }
+
     // Clear existing data
     await prisma.score.deleteMany();
     await prisma.judge.deleteMany();
@@ -19,7 +28,7 @@ export async function POST(req: NextRequest) {
     // Create demo participants
     const participants = [];
     
-    // Create 15 leaders
+    // Create 15 leaders (numbers 1-15)
     for (let i = 1; i <= 15; i++) {
       const participant = await prisma.participant.create({
         data: {
@@ -31,13 +40,13 @@ export async function POST(req: NextRequest) {
       participants.push(participant);
     }
     
-    // Create 15 followers
+    // Create 15 followers (numbers 16-30)
     for (let i = 1; i <= 15; i++) {
       const participant = await prisma.participant.create({
         data: {
           name: `Follower ${i}`,
           role: 'FOLLOWER',
-          number: i
+          number: i + 15 // Use numbers 16-30 for followers
         }
       });
       participants.push(participant);
@@ -129,9 +138,23 @@ export async function POST(req: NextRequest) {
     });
   } catch (error) {
     console.error('Error creating demo data:', error);
+    
+    // Provide more specific error messages
+    let errorMessage = 'Failed to create demo data';
+    
+    if (error instanceof Error) {
+      if (error.message.includes('Unique constraint failed')) {
+        errorMessage = 'Participant numbers conflict. Please reset the competition first.';
+      } else if (error.message.includes('Database not available')) {
+        errorMessage = 'Database connection error. Please try again.';
+      } else {
+        errorMessage = error.message;
+      }
+    }
+    
     return NextResponse.json({ 
       success: false, 
-      error: 'Failed to create demo data' 
+      error: errorMessage 
     }, { status: 500 });
   }
 } 

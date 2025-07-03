@@ -25,6 +25,8 @@ export default function JudgeDashboard({ user, onLogout }: JudgeDashboardProps) 
   const refreshTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const userActivityTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const countdownRef = useRef<NodeJS.Timeout | null>(null);
+  const [judgeCategory, setJudgeCategory] = useState<'AMATEUR' | 'PRO'>('AMATEUR');
+  const [scoringData, setScoringData] = useState<any>(null);
 
   // Track user activity to pause auto-refresh when they're scoring
   useEffect(() => {
@@ -79,38 +81,78 @@ export default function JudgeDashboard({ user, onLogout }: JudgeDashboardProps) 
 
   // Load initial data when component mounts
   useEffect(() => {
-    loadData();
-  }, []);
+    if (user?.id) {
+      fetchJudgeCategory();
+      fetchScoringData();
+    }
+  }, [user?.id]);
 
-  const loadData = async () => {
-    setLoading(true);
+  const fetchJudgeCategory = async () => {
     try {
+      const response = await fetch('/api/admin');
+      const data = await response.json();
+      
+      console.log('Admin data received:', data);
+      console.log('Competition state:', data.competitionState);
+      console.log('Category from API:', data.competitionState?.category);
+      
+      if (response.ok && data.competitionState?.category) {
+        setJudgeCategory(data.competitionState.category);
+        console.log('Setting judge category to:', data.competitionState.category);
+      } else {
+        // Fallback: check if there's a category in localStorage or URL params
+        const urlParams = new URLSearchParams(window.location.search);
+        const categoryFromUrl = urlParams.get('category');
+        const categoryFromStorage = localStorage.getItem('judgeCategory');
+        
+        const fallbackCategory = categoryFromUrl || categoryFromStorage || 'AMATEUR';
+        console.log('No category found in API, using fallback:', fallbackCategory);
+        setJudgeCategory(fallbackCategory as 'AMATEUR' | 'PRO');
+      }
+    } catch (error) {
+      console.error('Failed to fetch judge category:', error);
+      // Fallback to localStorage or default
+      const categoryFromStorage = localStorage.getItem('judgeCategory') || 'AMATEUR';
+      setJudgeCategory(categoryFromStorage as 'AMATEUR' | 'PRO');
+    }
+  };
+
+  const fetchScoringData = async () => {
+    try {
+      setLoading(true);
+      const startTime = Date.now();
+      
       const response = await fetch(`/api/judges/scoring?userId=${user.id}&role=${user.role}`);
       const data = await response.json();
       
+      const endTime = Date.now();
+      console.log(`Scoring data fetch took ${endTime - startTime}ms`);
+      
       if (response.ok) {
+        setScoringData(data);
+        setMessage(data.message || '');
+        setLastRefresh(new Date());
+        setShowRefreshButton(false);
         setPhase(data.phase);
         setActiveHeat(data.activeHeat);
         setParticipants(data.participants || []);
         setHasActiveHeat(data.hasActiveHeat);
         setHasScoredForHeat(data.hasScoredForHeat || false);
         setHasScoredForPhase(data.hasScoredForPhase || false);
-        setMessage(data.message || '');
-        setLastRefresh(new Date());
-        setShowRefreshButton(false);
       } else {
         setMessage(`Error: ${data.error}`);
         setTimeout(() => setMessage(''), 5000);
       }
     } catch (error) {
-      setMessage('Failed to load scoring data');
+      setMessage('Failed to fetch scoring data');
       setTimeout(() => setMessage(''), 5000);
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   const handleManualRefresh = () => {
-    loadData();
+    fetchScoringData();
   };
 
   const getParticipantsToJudge = (): any[] => {
@@ -169,7 +211,7 @@ export default function JudgeDashboard({ user, onLogout }: JudgeDashboardProps) 
       if (response.ok) {
         setMessage(`Scores submitted successfully for ${scoresToSubmit.length} participants!`);
         setScores(new Map());
-        setTimeout(() => setMessage(''), 3000);
+        await fetchScoringData();
         // Start countdown to refresh page after 10 seconds
         setCountdown(10);
       } else {
@@ -193,7 +235,6 @@ export default function JudgeDashboard({ user, onLogout }: JudgeDashboardProps) 
           <div className="absolute -bottom-40 -left-40 w-80 h-80 bg-pink-400 rounded-full mix-blend-multiply filter blur-xl opacity-20 animate-blob animation-delay-2000"></div>
           <div className="absolute top-40 left-40 w-80 h-80 bg-purple-400 rounded-full mix-blend-multiply filter blur-xl opacity-20 animate-blob animation-delay-4000"></div>
         </div>
-        
         <div className="relative z-10 text-center px-4">
           <div className="text-6xl mb-4 animate-bounce">⚖️</div>
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-yellow-400 mx-auto mb-4"></div>
@@ -223,6 +264,9 @@ export default function JudgeDashboard({ user, onLogout }: JudgeDashboardProps) 
                 <p className="text-white/80 text-sm sm:text-base">
                   {user.name} - {user.role} Judge
                 </p>
+                <p className="text-blue-200 text-xs sm:text-sm">
+                  🏆 Judging {judgeCategory.toLowerCase()} competition
+                </p>
               </div>
             </div>
             <div className="flex flex-col sm:flex-row items-center space-y-2 sm:space-y-0 sm:space-x-3">
@@ -235,6 +279,13 @@ export default function JudgeDashboard({ user, onLogout }: JudgeDashboardProps) 
                   🔄 Refresh
                 </button>
               )}
+              {/* Category Refresh Button */}
+              <button
+                onClick={fetchJudgeCategory}
+                className="px-4 py-2 bg-purple-500/20 text-purple-200 rounded-full hover:bg-purple-500/30 transition-all duration-300 backdrop-blur-sm border border-purple-400/30 text-sm"
+              >
+                🏆 Refresh Category
+              </button>
             <button
               onClick={onLogout}
                 className="w-full sm:w-auto px-6 py-3 sm:py-2 bg-white/20 text-white rounded-full hover:bg-white/30 transition-all duration-300 backdrop-blur-sm border border-white/30 text-base sm:text-sm"
@@ -321,7 +372,7 @@ export default function JudgeDashboard({ user, onLogout }: JudgeDashboardProps) 
                 <button
                   onClick={() => {
                     setCountdown(null);
-                    loadData();
+                    fetchScoringData();
                   }}
                   className="px-4 py-2 bg-orange-500/30 text-orange-200 rounded-lg hover:bg-orange-500/40 transition-all duration-300 text-sm"
                 >
@@ -339,7 +390,7 @@ export default function JudgeDashboard({ user, onLogout }: JudgeDashboardProps) 
                 <button
                   onClick={() => {
                     setCountdown(null);
-                    loadData();
+                    fetchScoringData();
                   }}
                   className="px-4 py-2 bg-orange-500/30 text-orange-200 rounded-lg hover:bg-orange-500/40 transition-all duration-300 text-sm"
                 >

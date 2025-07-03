@@ -35,6 +35,9 @@ export default function AdminDashboard({ user, onLogout }: AdminDashboardProps) 
   const [uploadingImage, setUploadingImage] = useState(false);
   const [selectedImage, setSelectedImage] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string>('');
+  const [competitionCategory, setCompetitionCategory] = useState<'AMATEUR' | 'PRO'>('AMATEUR');
+  const [judgeCategory, setJudgeCategory] = useState<'AMATEUR' | 'PRO'>('AMATEUR');
+  const [competitionTab, setCompetitionTab] = useState<'setup' | 'progression' | 'management'>('setup');
 
   useEffect(() => {
     loadData();
@@ -239,14 +242,14 @@ export default function AdminDashboard({ user, onLogout }: AdminDashboardProps) 
       const response = await fetch('/api/admin', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'generate_heats' })
+        body: JSON.stringify({ action: 'generate_heats', category: competitionCategory })
       });
       const data = await response.json();
       
       if (response.ok) {
         setNotificationType('success');
         setNotificationTitle('🔥 Heats Generated!');
-        setNotificationMessage(`Successfully generated ${data.heats} heats with random participant distribution. The competition is now ready to begin!`);
+        setNotificationMessage(`Successfully generated ${data.heats} heat(s) for ${data.totalCouples} couples with random participant distribution. The competition is now ready to begin!`);
         setShowNotification(true);
         setTimeout(() => setShowNotification(false), 8000);
         fetchAdminData(); // Refresh data to show the new heats
@@ -391,15 +394,53 @@ export default function AdminDashboard({ user, onLogout }: AdminDashboardProps) 
       const data = await response.json();
       if (data.success) {
         setMessage('Demo data populated successfully!');
+        setNotificationType('success');
+        setNotificationTitle('🧪 Demo Data Added!');
+        setNotificationMessage('Demo setup complete. Sample participants, judges, and heats have been added.');
         loadData();
         setTimeout(() => setMessage(''), 3000);
       } else {
-        setMessage('Error: Failed to populate demo data');
+        setMessage(`Error: ${data.error || 'Failed to populate demo data'}`);
         setTimeout(() => setMessage(''), 5000);
       }
     } catch (error) {
       setMessage('Error: Failed to populate demo data');
       setTimeout(() => setMessage(''), 5000);
+    }
+  };
+
+  const saveJudgeCategory = async () => {
+    try {
+      const response = await fetch('/api/admin', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'set_judge_category', category: judgeCategory })
+      });
+      const data = await response.json();
+      
+      if (response.ok) {
+        // Save to localStorage for fallback
+        localStorage.setItem('judgeCategory', judgeCategory);
+        
+        setNotificationType('success');
+        setNotificationTitle('✅ Judge Category Updated!');
+        setNotificationMessage(`Judges will now see the ${judgeCategory} competition heats.`);
+        setShowNotification(true);
+        setTimeout(() => setShowNotification(false), 5000);
+        fetchAdminData(); // Refresh data to show updated category
+      } else {
+        setNotificationType('error');
+        setNotificationTitle('❌ Error');
+        setNotificationMessage(`Failed to update judge category: ${data.error}`);
+        setShowNotification(true);
+        setTimeout(() => setShowNotification(false), 5000);
+      }
+    } catch (error) {
+      setNotificationType('error');
+      setNotificationTitle('❌ Error');
+      setNotificationMessage('Failed to update judge category. Please try again.');
+      setShowNotification(true);
+      setTimeout(() => setShowNotification(false), 5000);
     }
   };
 
@@ -531,25 +572,7 @@ export default function AdminDashboard({ user, onLogout }: AdminDashboardProps) 
         {activeTab === 'overview' && (
           <div className="space-y-8">
             {/* Stats Cards */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-              {/* Competition Status */}
-              <div className="bg-white/10 backdrop-blur-lg rounded-2xl p-6 border border-white/20">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-white/60 text-sm font-medium">Competition Phase</p>
-                    <p className="text-2xl font-bold text-white mt-1">
-                      {adminData?.competition?.phase || 'Not Started'}
-                    </p>
-                  </div>
-                  <div className="text-3xl">
-                    {adminData?.competition?.phase === 'heats' && '🔥'}
-                    {adminData?.competition?.phase === 'semifinal' && '⚡'}
-                    {adminData?.competition?.phase === 'final' && '🏆'}
-                    {adminData?.competition?.phase === 'winners' && '👑'}
-                  </div>
-                </div>
-              </div>
-
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
               {/* Participants Count */}
               <div className="bg-white/10 backdrop-blur-lg rounded-2xl p-6 border border-white/20">
                 <div className="flex items-center justify-between">
@@ -576,16 +599,21 @@ export default function AdminDashboard({ user, onLogout }: AdminDashboardProps) 
                 </div>
               </div>
 
-              {/* Current Heat */}
+              {/* Competition Phase */}
               <div className="bg-white/10 backdrop-blur-lg rounded-2xl p-6 border border-white/20">
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="text-white/60 text-sm font-medium">Current Heat</p>
+                    <p className="text-white/60 text-sm font-medium">Competition Phase</p>
                     <p className="text-2xl font-bold text-white mt-1">
-                      {adminData?.competition?.currentHeat || 'N/A'}
+                      {adminData?.competitionState?.currentPhase ? adminData.competitionState.currentPhase.charAt(0).toUpperCase() + adminData.competitionState.currentPhase.slice(1) : 'Setup'}
                     </p>
                   </div>
-                  <div className="text-3xl">🎵</div>
+                  <div className="text-3xl">
+                    {adminData?.competitionState?.currentPhase === 'heats' && '🔥'}
+                    {adminData?.competitionState?.currentPhase === 'semifinal' && '⚡'}
+                    {adminData?.competitionState?.currentPhase === 'final' && '🏆'}
+                    {!adminData?.competitionState?.currentPhase && '⚙️'}
+                  </div>
                 </div>
               </div>
             </div>
@@ -620,10 +648,6 @@ export default function AdminDashboard({ user, onLogout }: AdminDashboardProps) 
               <h3 className="text-xl font-bold text-white mb-4">Recent Activity</h3>
               <div className="space-y-3">
                 <div className="flex items-center space-x-3 text-white/80">
-                  <span className="text-lg">📊</span>
-                  <span>Competition phase: {adminData?.competition?.phase || 'Not started'}</span>
-                </div>
-                <div className="flex items-center space-x-3 text-white/80">
                   <span className="text-lg">👥</span>
                   <span>{participants.length} participants registered</span>
                 </div>
@@ -631,12 +655,6 @@ export default function AdminDashboard({ user, onLogout }: AdminDashboardProps) 
                   <span className="text-lg">⚖️</span>
                   <span>{judges.length} judges active</span>
                 </div>
-                {adminData?.competition?.currentHeat && (
-                  <div className="flex items-center space-x-3 text-white/80">
-                    <span className="text-lg">🎵</span>
-                    <span>Current heat: {adminData.competition.currentHeat}</span>
-                  </div>
-                )}
               </div>
             </div>
           </div>
@@ -1077,138 +1095,351 @@ export default function AdminDashboard({ user, onLogout }: AdminDashboardProps) 
 
         {activeTab === "competition" && (
           <div className="space-y-8">
-            {/* Competition Management */}
+            {/* Competition Management with Tabs */}
             <div className="bg-white/10 backdrop-blur-lg rounded-2xl p-8 border border-white/20">
-              <h2 className="text-2xl font-bold text-white mb-6 flex items-center">
-                <span className="mr-3">🏆</span>
-                Competition Management
+              <h2 className="text-3xl font-bold text-white mb-8 flex items-center">
+                <span className="mr-4 text-4xl">🎯</span>
+                Competition Control Center
               </h2>
               
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {/* Tab Navigation */}
+              <div className="flex flex-wrap gap-2 mb-8">
+                <button
+                  onClick={() => setCompetitionTab('setup')}
+                  className={`px-6 py-3 rounded-xl font-semibold transition-all duration-300 ${
+                    competitionTab === 'setup'
+                      ? 'bg-gradient-to-r from-blue-500 to-purple-600 text-white shadow-lg'
+                      : 'bg-white/10 text-white/70 hover:bg-white/20'
+                  }`}
+                >
+                  🎬 Setup
+                </button>
+                <button
+                  onClick={() => setCompetitionTab('progression')}
+                  className={`px-6 py-3 rounded-xl font-semibold transition-all duration-300 ${
+                    competitionTab === 'progression'
+                      ? 'bg-gradient-to-r from-purple-500 to-pink-600 text-white shadow-lg'
+                      : 'bg-white/10 text-white/70 hover:bg-white/20'
+                  }`}
+                >
+                  ⚡ Progression
+                </button>
+                <button
+                  onClick={() => setCompetitionTab('management')}
+                  className={`px-6 py-3 rounded-xl font-semibold transition-all duration-300 ${
+                    competitionTab === 'management'
+                      ? 'bg-gradient-to-r from-red-500 to-orange-600 text-white shadow-lg'
+                      : 'bg-white/10 text-white/70 hover:bg-white/20'
+                  }`}
+                >
+                  ⚙️ Management
+                </button>
+              </div>
+
+              {/* Tab Content */}
+              {competitionTab === 'setup' && (
+                <div className="space-y-6">
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 {/* Generate Heats */}
-                <div className="bg-white/10 rounded-xl p-6 border border-white/20 hover:bg-white/15 transition-all duration-300">
+                    <div className="bg-gradient-to-br from-blue-500/20 to-purple-600/20 rounded-xl p-6 border border-blue-400/30 hover:bg-blue-500/30 transition-all duration-300 transform hover:scale-105">
                   <div className="text-center">
-                    <div className="text-4xl mb-4">🔥</div>
-                    <h3 className="text-lg font-semibold text-white mb-2">Generate Heats</h3>
-                    <p className="text-white/60 text-sm mb-4">
-                      Create 3 heats with 5 couples each from 15 leaders and 15 followers
-                    </p>
+                        <div className="text-5xl mb-4 animate-pulse">🔥</div>
+                        <h4 className="text-lg font-semibold text-white mb-3">Generate Competition Heats</h4>
+                        <div className="bg-black/20 rounded-lg p-4 mb-4">
+                          <p className="text-blue-200 text-sm font-medium mb-2">Smart Heat Distribution:</p>
+                          <ul className="text-blue-100 text-xs space-y-1">
+                            <li>• ≤14 couples → 1 heat</li>
+                            <li>• 15-18 couples → 2 heats</li>
+                            <li>• &gt;18 couples → 3 heats</li>
+                          </ul>
+                        </div>
+                        
+                        {/* Category Selection */}
+                        <div className="mb-4">
+                          <label htmlFor="competition-category" className="block text-sm font-semibold text-white mb-2 flex items-center justify-center gap-2">
+                            <span className="text-lg">🏆</span>
+                            Competition Category
+                          </label>
+                          <select
+                            id="competition-category"
+                            value={competitionCategory}
+                            onChange={e => setCompetitionCategory(e.target.value as 'AMATEUR' | 'PRO')}
+                            className="w-full rounded-lg bg-gray-800/80 text-white border-2 border-blue-400/50 focus:border-blue-300 focus:ring-2 focus:ring-blue-300 px-4 py-3 shadow-lg transition-all duration-200 outline-none text-center font-medium"
+                          >
+                            <option value="AMATEUR">🥉 Amateur Division</option>
+                            <option value="PRO">🥇 Pro Division</option>
+                          </select>
+                        </div>
+                        
                     <button
                       onClick={generateHeats}
-                      className="px-6 py-3 bg-gradient-to-r from-orange-400 to-red-500 text-white font-semibold rounded-xl hover:from-orange-500 hover:to-red-600 transition-all duration-300 transform hover:scale-105 shadow-lg"
+                          className="w-full px-6 py-4 bg-gradient-to-r from-orange-400 to-red-500 text-white font-bold rounded-xl hover:from-orange-500 hover:to-red-600 transition-all duration-300 transform hover:scale-105 shadow-xl border border-orange-300/30"
                     >
-                      Generate Heats
+                          🚀 Launch Competition
                     </button>
                   </div>
                 </div>
 
+                    {/* Demo Data */}
+                    <div className="bg-gradient-to-br from-green-500/20 to-teal-600/20 rounded-xl p-6 border border-green-400/30 hover:bg-green-500/30 transition-all duration-300 transform hover:scale-105">
+                      <div className="text-center">
+                        <div className="text-5xl mb-4 animate-bounce">🎭</div>
+                        <h4 className="text-lg font-semibold text-white mb-3">Quick Setup</h4>
+                        <p className="text-green-200 text-sm mb-4">
+                          Add sample participants and judges for testing and demonstration
+                        </p>
+                        <button
+                          onClick={populateDemoData}
+                          className="w-full px-6 py-4 bg-gradient-to-r from-green-400 to-teal-500 text-white font-bold rounded-xl hover:from-green-500 hover:to-teal-600 transition-all duration-300 transform hover:scale-105 shadow-xl border border-green-300/30"
+                        >
+                          ⚡ Quick Demo Setup
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {competitionTab === 'progression' && (
+                <div className="space-y-6">
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                 {/* Advance to Semifinal */}
-                <div className="bg-white/10 rounded-xl p-6 border border-white/20 hover:bg-white/15 transition-all duration-300">
+                    <div className="bg-gradient-to-br from-purple-500/20 to-blue-600/20 rounded-xl p-6 border border-purple-400/30 hover:bg-purple-500/30 transition-all duration-300 transform hover:scale-105">
                   <div className="text-center">
-                    <div className="text-4xl mb-4">🥈</div>
-                    <h3 className="text-lg font-semibold text-white mb-2">Advance to Semifinal</h3>
-                    <p className="text-white/60 text-sm mb-4">
-                      Move top performers to semifinal round
-                    </p>
+                        <div className="text-5xl mb-4 animate-pulse">🥈</div>
+                        <h4 className="text-lg font-semibold text-white mb-3">Semifinal Round</h4>
+                        <p className="text-purple-200 text-sm mb-4">
+                          Advance top performers to semifinal competition
+                        </p>
+                        <div className="bg-black/20 rounded-lg p-3 mb-4">
+                          <p className="text-purple-200 text-xs">Top 8 Leaders + 8 Followers</p>
+                        </div>
                     <button
                       onClick={advanceToSemifinal}
-                      className="px-6 py-3 bg-gradient-to-r from-purple-400 to-blue-500 text-white font-semibold rounded-xl hover:from-purple-500 hover:to-blue-600 transition-all duration-300 transform hover:scale-105 shadow-lg"
+                          className="w-full px-6 py-3 bg-gradient-to-r from-purple-400 to-blue-500 text-white font-bold rounded-xl hover:from-purple-500 hover:to-blue-600 transition-all duration-300 transform hover:scale-105 shadow-xl border border-purple-300/30"
                     >
-                      Advance to Semifinal
+                          🚀 Advance to Semifinal
                     </button>
                   </div>
                 </div>
 
                 {/* Advance to Final */}
-                <div className="bg-white/10 rounded-xl p-6 border border-white/20 hover:bg-white/15 transition-all duration-300">
+                    <div className="bg-gradient-to-br from-yellow-500/20 to-orange-600/20 rounded-xl p-6 border border-yellow-400/30 hover:bg-yellow-500/30 transition-all duration-300 transform hover:scale-105">
                   <div className="text-center">
-                    <div className="text-4xl mb-4">🏆</div>
-                    <h3 className="text-lg font-semibold text-white mb-2">Advance to Final</h3>
-                    <p className="text-white/60 text-sm mb-4">
-                      Move semifinal winners to final round
-                    </p>
+                        <div className="text-5xl mb-4 animate-pulse">🏆</div>
+                        <h4 className="text-lg font-semibold text-white mb-3">Final Round</h4>
+                        <p className="text-yellow-200 text-sm mb-4">
+                          Move semifinal winners to the grand finale
+                        </p>
+                        <div className="bg-black/20 rounded-lg p-3 mb-4">
+                          <p className="text-yellow-200 text-xs">Top 5 Leaders + 5 Followers</p>
+                        </div>
                     <button
                       onClick={advanceToFinal}
-                      className="px-6 py-3 bg-gradient-to-r from-yellow-400 to-orange-500 text-white font-semibold rounded-xl hover:from-yellow-500 hover:to-orange-600 transition-all duration-300 transform hover:scale-105 shadow-lg"
+                          className="w-full px-6 py-3 bg-gradient-to-r from-yellow-400 to-orange-500 text-white font-bold rounded-xl hover:from-yellow-500 hover:to-orange-600 transition-all duration-300 transform hover:scale-105 shadow-xl border border-yellow-300/30"
                     >
-                      Advance to Final
+                          👑 Advance to Final
                     </button>
                   </div>
                 </div>
 
                 {/* Determine Winners */}
-                <div className="bg-white/10 rounded-xl p-6 border border-white/20 hover:bg-white/15 transition-all duration-300">
+                    <div className="bg-gradient-to-br from-pink-500/20 to-red-600/20 rounded-xl p-6 border border-pink-400/30 hover:bg-pink-500/30 transition-all duration-300 transform hover:scale-105">
                   <div className="text-center">
-                    <div className="text-4xl mb-4">👑</div>
-                    <h3 className="text-lg font-semibold text-white mb-2">Determine Winners</h3>
-                    <p className="text-white/60 text-sm mb-4">
-                      Calculate final winners based on scores
-                    </p>
+                        <div className="text-5xl mb-4 animate-pulse">👑</div>
+                        <h4 className="text-lg font-semibold text-white mb-3">Crown Winners</h4>
+                        <p className="text-pink-200 text-sm mb-4">
+                          Calculate and announce the competition champions
+                        </p>
+                        <div className="bg-black/20 rounded-lg p-3 mb-4">
+                          <p className="text-pink-200 text-xs">1st, 2nd, 3rd Place</p>
+                        </div>
                     <button
                       onClick={determineWinners}
-                      className="px-6 py-3 bg-gradient-to-r from-purple-400 to-pink-500 text-white font-semibold rounded-xl hover:from-purple-500 hover:to-pink-600 transition-all duration-300 transform hover:scale-105 shadow-lg"
-                    >
-                      Determine Winners
-                    </button>
+                          className="w-full px-6 py-3 bg-gradient-to-r from-pink-400 to-red-500 text-white font-bold rounded-xl hover:from-pink-500 hover:to-red-600 transition-all duration-300 transform hover:scale-105 shadow-xl border border-pink-300/30"
+                        >
+                          🏅 Determine Winners
+                        </button>
+                      </div>
+                    </div>
                   </div>
                 </div>
+              )}
 
-                {/* Reset Competition */}
-                <div className="bg-white/10 rounded-xl p-6 border border-white/20 hover:bg-white/15 transition-all duration-300">
-                  <div className="text-center">
-                    <div className="text-4xl mb-4">🔄</div>
-                    <h3 className="text-lg font-semibold text-white mb-2">Reset Competition</h3>
-                    <p className="text-white/60 text-sm mb-4">
-                      Clear all competition data and start fresh
-                    </p>
-                    <button
-                      onClick={async () => {
-                        if (confirm('Are you sure you want to reset the competition? This will clear all heats and scores.')) {
-                          try {
-                            const response = await fetch('/api/admin', {
-                              method: 'POST',
-                              headers: { 'Content-Type': 'application/json' },
-                              body: JSON.stringify({ action: 'reset_competition' })
-                            });
-                            const data = await response.json();
-                            
-                            if (response.ok) {
-                              setMessage('Competition reset successfully!');
-                              setTimeout(() => setMessage(''), 3000);
-                            } else {
-                              setMessage(`Error: ${data.error}`);
-                              setTimeout(() => setMessage(''), 5000);
+              {competitionTab === 'management' && (
+                <div className="space-y-6">
+                  {/* Judge Scoring Status */}
+                  {adminData?.judgeScoringStatus && (
+                    <div className="bg-gradient-to-br from-green-500/20 to-blue-600/20 rounded-xl p-6 border border-green-400/30">
+                      <div className="text-center mb-6">
+                        <div className="text-4xl mb-2">📊</div>
+                        <h4 className="text-xl font-semibold text-white mb-2">Judge Scoring Status</h4>
+                        <p className="text-green-200 text-sm">
+                          Heat {adminData.judgeScoringStatus.heatNumber} - {adminData.judgeScoringStatus.totalScores}/{adminData.judgeScoringStatus.expectedScores} scores submitted
+                        </p>
+                        <div className="mt-3">
+                          <div className="inline-flex items-center px-4 py-2 bg-green-500/30 rounded-full text-green-200 text-sm font-medium">
+                            <span className="w-2 h-2 bg-green-400 rounded-full mr-2"></span>
+                            {adminData.judgeScoringStatus.scoredJudges.length} judges completed
+                          </div>
+                          {adminData.judgeScoringStatus.pendingJudges.length > 0 && (
+                            <div className="inline-flex items-center px-4 py-2 bg-yellow-500/30 rounded-full text-yellow-200 text-sm font-medium ml-3">
+                              <span className="w-2 h-2 bg-yellow-400 rounded-full mr-2"></span>
+                              {adminData.judgeScoringStatus.pendingJudges.length} judges pending
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        {/* Judges who have scored */}
+                        <div>
+                          <h5 className="text-lg font-semibold text-green-300 mb-3 flex items-center">
+                            <span className="mr-2">✅</span>
+                            Completed Scoring
+                          </h5>
+                          <div className="space-y-2">
+                            {adminData.judgeScoringStatus.scoredJudges.length > 0 ? (
+                              adminData.judgeScoringStatus.scoredJudges.map((judge: any) => (
+                                <div key={judge.id} className="bg-green-500/20 rounded-lg p-3 border border-green-400/30">
+                                  <div className="flex items-center justify-between">
+                                    <div>
+                                      <div className="font-semibold text-white">{judge.name}</div>
+                                      <div className="text-green-300 text-sm capitalize">{judge.role}</div>
+                                    </div>
+                                    <div className="text-green-400 text-lg">✓</div>
+                                  </div>
+                                </div>
+                              ))
+                            ) : (
+                              <div className="bg-white/10 rounded-lg p-3 border border-white/20 text-center">
+                                <div className="text-white/60 text-sm">No judges have scored yet</div>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Judges who haven't scored */}
+                        <div>
+                          <h5 className="text-lg font-semibold text-yellow-300 mb-3 flex items-center">
+                            <span className="mr-2">⏳</span>
+                            Pending Scoring
+                          </h5>
+                          <div className="space-y-2">
+                            {adminData.judgeScoringStatus.pendingJudges.length > 0 ? (
+                              adminData.judgeScoringStatus.pendingJudges.map((judge: any) => (
+                                <div key={judge.id} className="bg-yellow-500/20 rounded-lg p-3 border border-yellow-400/30">
+                                  <div className="flex items-center justify-between">
+                                    <div>
+                                      <div className="font-semibold text-white">{judge.name}</div>
+                                      <div className="text-yellow-300 text-sm capitalize">{judge.role}</div>
+                                    </div>
+                                    <div className="text-yellow-400 text-lg">⏳</div>
+                                  </div>
+                                </div>
+                              ))
+                            ) : (
+                              <div className="bg-green-500/20 rounded-lg p-3 border border-green-400/30 text-center">
+                                <div className="text-green-300 text-sm font-semibold">All judges have scored! 🎉</div>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    {/* Judge Category Configuration */}
+                    <div className="bg-gradient-to-br from-blue-500/20 to-purple-600/20 rounded-xl p-6 border border-blue-400/30">
+                      <div className="text-center">
+                        <div className="text-4xl mb-4">⚖️</div>
+                        <h4 className="text-lg font-semibold text-white mb-3">Judge Category Setting</h4>
+                        <p className="text-blue-200 text-sm mb-6">
+                          Choose which competition category judges will see in their dashboard
+                        </p>
+                        
+                        <div className="mb-6 flex flex-col items-center justify-center">
+                          <label htmlFor="judge-category-setting" className="block text-sm font-semibold text-white mb-2 flex items-center gap-2">
+                            <span className="inline-block text-lg">🏆</span>
+                            Judge Competition Category
+                          </label>
+                          <select
+                            id="judge-category-setting"
+                            value={judgeCategory}
+                            onChange={e => setJudgeCategory(e.target.value as 'AMATEUR' | 'PRO')}
+                            className="mt-1 block w-56 rounded-lg bg-gray-800 text-white border border-blue-400 focus:border-blue-500 focus:ring-blue-500 px-4 py-2 shadow-sm transition-all duration-200 outline-none appearance-none text-center"
+                          >
+                            <option value="AMATEUR">🥉 Amateur Division</option>
+                            <option value="PRO">🥇 Pro Division</option>
+                          </select>
+                          <p className="text-xs text-blue-200 mt-1 text-center">
+                            Judges will see heats from the {judgeCategory.toLowerCase()} competition
+                          </p>
+                        </div>
+                        
+                        <button
+                          onClick={saveJudgeCategory}
+                          className="px-6 py-3 bg-gradient-to-r from-blue-400 to-purple-500 text-white font-semibold rounded-xl hover:from-blue-500 hover:to-purple-600 transition-all duration-300 transform hover:scale-105 shadow-lg"
+                        >
+                          💾 Save Judge Category
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Reset Competition */}
+                    <div className="bg-gradient-to-br from-red-500/10 to-orange-600/10 rounded-xl p-6 border border-red-400/30">
+                      <div className="text-center">
+                        <div className="text-4xl mb-4">🔄</div>
+                        <h4 className="text-lg font-semibold text-white mb-3">Reset Competition</h4>
+                        <p className="text-red-200 text-sm mb-4">
+                          Clear all competition data and start fresh for a new event
+                        </p>
+                        <div className="bg-black/20 rounded-lg p-4 mb-4">
+                          <p className="text-red-200 text-xs font-medium">⚠️ This action will:</p>
+                          <ul className="text-red-100 text-xs space-y-1 mt-2">
+                            <li>• Clear all heats and scores</li>
+                            <li>• Reset competition phases</li>
+                            <li>• Remove all competition data</li>
+                          </ul>
+                        </div>
+                        <button
+                          onClick={async () => {
+                            if (confirm('⚠️ Are you sure you want to reset the competition?\n\nThis will permanently clear all heats, scores, and competition data.')) {
+                              try {
+                                const response = await fetch('/api/admin', {
+                                  method: 'POST',
+                                  headers: { 'Content-Type': 'application/json' },
+                                  body: JSON.stringify({ action: 'reset_competition' })
+                                });
+                                const data = await response.json();
+                                
+                                if (response.ok) {
+                                  setMessage('✅ Competition reset successfully! Refreshing data...');
+                                  setNotificationType('success');
+                                  setNotificationTitle('🔄 Competition Reset!');
+                                  setNotificationMessage('Competition has been reset. All data cleared and ready for a new event.');
+                                  loadData();
+                                  setTimeout(() => setMessage(''), 3000);
+                                } else {
+                                  setMessage(`❌ Error: ${data.error}`);
+                                  setTimeout(() => setMessage(''), 5000);
+                                }
+                              } catch (error) {
+                                setMessage('❌ Error: Failed to reset competition');
+                                setTimeout(() => setMessage(''), 5000);
+                              }
                             }
-                          } catch (error) {
-                            setMessage('Error: Failed to reset competition');
-                            setTimeout(() => setMessage(''), 5000);
-                          }
-                        }
-                      }}
-                      className="px-6 py-3 bg-gradient-to-r from-red-400 to-pink-500 text-white font-semibold rounded-xl hover:from-red-500 hover:to-pink-600 transition-all duration-300 transform hover:scale-105 shadow-lg"
-                    >
-                      Reset Competition
-                    </button>
+                          }}
+                          className="px-8 py-4 bg-gradient-to-r from-red-400 to-orange-500 text-white font-bold rounded-xl hover:from-red-500 hover:to-orange-600 transition-all duration-300 transform hover:scale-105 shadow-xl border border-red-300/30"
+                        >
+                          🔄 Reset Competition
+                        </button>
+                      </div>
+                    </div>
                   </div>
                 </div>
-
-                {/* Populate Demo Data */}
-                <div className="bg-white/10 rounded-xl p-6 border border-white/20 hover:bg-white/15 transition-all duration-300">
-                  <div className="text-center">
-                    <div className="text-4xl mb-4">🎭</div>
-                    <h3 className="text-lg font-semibold text-white mb-2">Populate Demo Data</h3>
-                    <p className="text-white/60 text-sm mb-4">
-                      Add sample participants and judges for testing
-                    </p>
-                    <button
-                      onClick={populateDemoData}
-                      className="px-6 py-3 bg-gradient-to-r from-green-400 to-blue-500 text-white font-semibold rounded-xl hover:from-green-500 hover:to-blue-600 transition-all duration-300 transform hover:scale-105 shadow-lg"
-                    >
-                      Add Demo Data
-                    </button>
-                  </div>
-                </div>
-              </div>
+              )}
             </div>
 
             {/* Active Heat Status */}
@@ -1229,106 +1460,14 @@ export default function AdminDashboard({ user, onLogout }: AdminDashboardProps) 
               </div>
             )}
 
-            {/* Heat Results */}
-            {adminData?.heatResults && adminData.heatResults.length > 0 && (
-              <div className="bg-white/10 backdrop-blur-lg rounded-2xl p-8 border border-white/20">
-                <h3 className="text-2xl font-bold text-white mb-6 flex items-center">
-                  <span className="mr-3">📊</span>
-                  Heat Results
-                </h3>
-                <div className="space-y-6">
-                  {adminData.heatResults.map((heat: any) => (
-                    <div key={heat.id} className="bg-white/10 rounded-xl p-6 border border-white/20">
-                      <div className="flex items-center justify-between mb-4">
-                        <h4 className="text-xl font-bold text-white flex items-center">
-                          <span className="mr-2">🔥</span>
-                          Heat {heat.number}
-                          {heat.isActive && (
-                            <span className="ml-3 px-3 py-1 bg-green-500/30 text-green-200 rounded-full text-sm border border-green-400/50">
-                              ACTIVE
-                            </span>
-                          )}
-                        </h4>
-                        <div className="flex space-x-2">
-                          {!heat.isActive && (
-                            <button
-                              onClick={() => setActiveHeat(heat.id)}
-                              className="px-4 py-2 bg-blue-500/50 text-blue-200 rounded-lg text-sm hover:bg-blue-500/70 transition-colors"
-                            >
-                              Activate Heat
-                            </button>
-                          )}
-                          <div className="text-white/60 text-sm">
-                            {heat.totalScores} scores submitted
-                          </div>
-                        </div>
-                      </div>
-                      
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                        {/* Leaders */}
-                        <div>
-                          <h5 className="text-lg font-semibold text-blue-300 mb-3">🕺 Leaders</h5>
-                          <div className="space-y-2">
-                            {heat.participants
-                              .filter((p: any) => p.role === 'leader')
-                              .map((participant: any, index: number) => (
-                                <div key={participant.id} className="flex items-center justify-between bg-white/5 rounded-lg p-3">
-                                  <div className="flex items-center space-x-3">
-                                    <div className="w-8 h-8 bg-blue-500/30 rounded-full flex items-center justify-center text-blue-300 font-bold text-sm">
-                                      {index + 1}
-                                    </div>
-                                    <div>
-                                      <div className="text-white font-medium">{participant.name}</div>
-                                      <div className="text-white/60 text-sm">#{participant.number}</div>
-                                    </div>
-                                  </div>
-                                  <div className="text-right">
-                                    <div className="text-white font-bold">{participant.averageScore}</div>
-                                    <div className="text-white/60 text-xs">{participant.totalScores} scores</div>
-                                  </div>
-                                </div>
-                              ))}
-                          </div>
-                        </div>
-                        
-                        {/* Followers */}
-                        <div>
-                          <h5 className="text-lg font-semibold text-pink-300 mb-3">💃 Followers</h5>
-                          <div className="space-y-2">
-                            {heat.participants
-                              .filter((p: any) => p.role === 'follower')
-                              .map((participant: any, index: number) => (
-                                <div key={participant.id} className="flex items-center justify-between bg-white/5 rounded-lg p-3">
-                                  <div className="flex items-center space-x-3">
-                                    <div className="w-8 h-8 bg-pink-500/30 rounded-full flex items-center justify-center text-pink-300 font-bold text-sm">
-                                      {index + 1}
-                                    </div>
-                                    <div>
-                                      <div className="text-white font-medium">{participant.name}</div>
-                                      <div className="text-white/60 text-sm">#{participant.number}</div>
-                                    </div>
-                                  </div>
-                                  <div className="text-right">
-                                    <div className="text-white font-bold">{participant.averageScore}</div>
-                                    <div className="text-white/60 text-xs">{participant.totalScores} scores</div>
-                                  </div>
-                                </div>
-                              ))}
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Semifinalists */}
+            {/* Current Phase Sections - Show after active heat for logical flow */}
+            
+            {/* Semifinalists - Show after active heat */}
             {adminData?.competitionState?.semifinalists && adminData.competitionState.semifinalists.length > 0 && (
               <div className="bg-white/10 backdrop-blur-lg rounded-2xl p-8 border border-white/20">
                 <h3 className="text-2xl font-bold text-white mb-6 flex items-center">
                   <span className="mr-3">🥈</span>
-                  Semifinalists
+                  Current Phase: Semifinalists
                 </h3>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                   <div>
@@ -1381,12 +1520,12 @@ export default function AdminDashboard({ user, onLogout }: AdminDashboardProps) 
               </div>
             )}
 
-            {/* Finalists */}
+            {/* Finalists - Show after semifinalists */}
             {adminData?.competitionState?.finalists && adminData.competitionState.finalists.length > 0 && (
               <div className="bg-white/10 backdrop-blur-lg rounded-2xl p-8 border border-white/20">
                 <h3 className="text-2xl font-bold text-white mb-6 flex items-center">
                   <span className="mr-3">🏆</span>
-                  Finalists
+                  Current Phase: Finalists
                 </h3>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                   <div>
@@ -1439,8 +1578,9 @@ export default function AdminDashboard({ user, onLogout }: AdminDashboardProps) 
               </div>
             )}
 
-            {/* Winners */}
-            {adminData?.competitionState?.winners && (
+            {/* Winners - Show after finalists */}
+            {adminData?.competitionState?.winners && 
+             (adminData.competitionState.winners.leader?.first || adminData.competitionState.winners.follower?.first) && (
               <div className="bg-white/10 backdrop-blur-lg rounded-2xl p-8 border border-white/20">
                 <h3 className="text-2xl font-bold text-white mb-6 flex items-center">
                   <span className="mr-3">👑</span>
@@ -1574,6 +1714,102 @@ export default function AdminDashboard({ user, onLogout }: AdminDashboardProps) 
               </div>
             )}
 
+            {/* Heat Results */}
+            {adminData?.heatResults && adminData.heatResults.length > 0 && (
+              <div className="bg-white/10 backdrop-blur-lg rounded-2xl p-8 border border-white/20">
+                <h3 className="text-2xl font-bold text-white mb-6 flex items-center">
+                  <span className="mr-3">📊</span>
+                  Heat Results
+                </h3>
+                <div className="space-y-6">
+                  {adminData.heatResults.map((heat: any) => (
+                    <div key={heat.id} className="bg-white/10 rounded-xl p-6 border border-white/20">
+                      <div className="flex items-center justify-between mb-4">
+                        <h4 className="text-xl font-bold text-white flex items-center">
+                          <span className="mr-2">🔥</span>
+                          Heat {heat.number}
+                          {heat.isActive && (
+                            <span className="ml-3 px-3 py-1 bg-green-500/30 text-green-200 rounded-full text-sm border border-green-400/50">
+                              ACTIVE
+                            </span>
+                          )}
+                        </h4>
+                        <div className="flex space-x-2">
+                          {!heat.isActive && (
+                            <button
+                              onClick={() => setActiveHeat(heat.id)}
+                              className="px-4 py-2 bg-blue-500/50 text-blue-200 rounded-lg text-sm hover:bg-blue-500/70 transition-colors"
+                            >
+                              Activate Heat
+                            </button>
+                          )}
+                          <div className="text-white/60 text-sm">
+                            {heat.totalScores} scores submitted
+                          </div>
+                        </div>
+                      </div>
+                      
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        {/* Leaders */}
+                        <div>
+                          <h5 className="text-lg font-semibold text-blue-300 mb-3">🕺 Leaders</h5>
+                          <div className="space-y-2">
+                            {heat.participants
+                              .filter((p: any) => p.role === 'leader')
+                              .map((participant: any, index: number) => (
+                                <div key={participant.id} className="flex items-center justify-between bg-white/5 rounded-lg p-3">
+                                  <div className="flex items-center space-x-3">
+                                    <div className="w-8 h-8 bg-blue-500/30 rounded-full flex items-center justify-center text-blue-300 font-bold text-sm">
+                                      {index + 1}
+                                    </div>
+                                    <div>
+                                      <div className="text-white font-medium">{participant.name}</div>
+                                      <div className="text-white/60 text-sm">#{participant.number}</div>
+                                    </div>
+                                  </div>
+                                  <div className="text-right">
+                                    <div className="text-white font-bold">{participant.averageScore}</div>
+                                    <div className="text-white/60 text-xs">{participant.totalScores} scores</div>
+                                  </div>
+                                </div>
+                              ))}
+                          </div>
+                        </div>
+                        
+                        {/* Followers */}
+                        <div>
+                          <h5 className="text-lg font-semibold text-pink-300 mb-3">💃 Followers</h5>
+                          <div className="space-y-2">
+                            {heat.participants
+                              .filter((p: any) => p.role === 'follower')
+                              .map((participant: any, index: number) => (
+                                <div key={participant.id} className="flex items-center justify-between bg-white/5 rounded-lg p-3">
+                                  <div className="flex items-center space-x-3">
+                                    <div className="w-8 h-8 bg-pink-500/30 rounded-full flex items-center justify-center text-pink-300 font-bold text-sm">
+                                      {index + 1}
+                                    </div>
+                                    <div>
+                                      <div className="text-white font-medium">{participant.name}</div>
+                                      <div className="text-white/60 text-sm">#{participant.number}</div>
+                                    </div>
+                                  </div>
+                                  <div className="text-right">
+                                    <div className="text-white font-bold">{participant.averageScore}</div>
+                                    <div className="text-white/60 text-xs">{participant.totalScores} scores</div>
+                                  </div>
+                                </div>
+                              ))}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+
+
             {/* Competition Status */}
             <div className="bg-white/10 backdrop-blur-lg rounded-2xl p-8 border border-white/20">
               <h3 className="text-2xl font-bold text-white mb-6 flex items-center">
@@ -1667,27 +1903,7 @@ export default function AdminDashboard({ user, onLogout }: AdminDashboardProps) 
               </h3>
               
               {/* Competition Phase */}
-              <div className="mb-8">
-                <h4 className="text-lg font-bold text-yellow-300 mb-4">Competition Phase</h4>
-                <div className="bg-gradient-to-r from-blue-500/30 to-purple-600/30 rounded-xl p-6 border border-blue-400/50">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <div className="text-2xl font-bold text-white">
-                        {adminData?.competition?.phase?.toUpperCase() || 'NOT STARTED'}
-                      </div>
-                      <div className="text-blue-200 text-sm mt-1">
-                        Current competition phase
-                      </div>
-                    </div>
-                    <div className="text-4xl">
-                      {adminData?.competition?.phase === 'heats' && '🔥'}
-                      {adminData?.competition?.phase === 'semifinal' && '⚡'}
-                      {adminData?.competition?.phase === 'final' && '🏆'}
-                      {adminData?.competition?.phase === 'winners' && '👑'}
-                    </div>
-                  </div>
-                </div>
-              </div>
+
 
               {/* Heat Results */}
               {adminData?.heatResults && adminData.heatResults.length > 0 && (
@@ -1701,11 +1917,9 @@ export default function AdminDashboard({ user, onLogout }: AdminDashboardProps) 
                           <div className="text-sm text-white/60">
                             {heat.participants?.length || 0} participants
                           </div>
-                          {heat.averageScore && (
-                            <div className="text-yellow-300 font-bold mt-2">
-                              Avg: {heat.averageScore.toFixed(2)}
-                            </div>
-                          )}
+                          <div className="text-sm text-white/60 mt-1">
+                            {heat.totalScores || 0} scores submitted
+                          </div>
                         </div>
                       </div>
                     ))}
@@ -1731,7 +1945,7 @@ export default function AdminDashboard({ user, onLogout }: AdminDashboardProps) 
                                   <div className="text-blue-300 text-sm">#{participant.number}</div>
                                 </div>
                                 <div className="text-yellow-300 font-bold">
-                                  {participant.averageScore?.toFixed(2) || 'N/A'}
+                                  {participant.totalScore || 'N/A'}
                                 </div>
                               </div>
                             </div>
@@ -1751,7 +1965,7 @@ export default function AdminDashboard({ user, onLogout }: AdminDashboardProps) 
                                   <div className="text-pink-300 text-sm">#{participant.number}</div>
                                 </div>
                                 <div className="text-yellow-300 font-bold">
-                                  {participant.averageScore?.toFixed(2) || 'N/A'}
+                                  {participant.totalScore || 'N/A'}
                                 </div>
                               </div>
                             </div>
@@ -1780,7 +1994,7 @@ export default function AdminDashboard({ user, onLogout }: AdminDashboardProps) 
                                   <div className="text-blue-300 text-sm">#{participant.number}</div>
                                 </div>
                                 <div className="text-yellow-300 font-bold">
-                                  {participant.averageScore?.toFixed(2) || 'N/A'}
+                                  {participant.totalScore || 'N/A'}
                                 </div>
                               </div>
                             </div>
@@ -1800,7 +2014,7 @@ export default function AdminDashboard({ user, onLogout }: AdminDashboardProps) 
                                   <div className="text-pink-300 text-sm">#{participant.number}</div>
                                 </div>
                                 <div className="text-yellow-300 font-bold">
-                                  {participant.averageScore?.toFixed(2) || 'N/A'}
+                                  {participant.totalScore || 'N/A'}
                                 </div>
                               </div>
                             </div>
