@@ -11,7 +11,7 @@ interface AdminDashboardProps {
 }
 
 export default function AdminDashboard({ user, onLogout }: AdminDashboardProps) {
-  const [activeTab, setActiveTab] = useState<'overview' | 'participants' | 'judges' | 'competition' | 'results'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'participants' | 'judges' | 'competition' | 'scoring-table' | 'results'>('overview');
   const [participants, setParticipants] = useState<Participant[]>([]);
   const [judges, setJudges] = useState<Judge[]>([]);
   const [newParticipant, setNewParticipant] = useState({ name: '', role: 'leader' as Role, number: 1, pictureUrl: '' });
@@ -444,6 +444,207 @@ export default function AdminDashboard({ user, onLogout }: AdminDashboardProps) 
     }
   };
 
+  const exportToExcel = async () => {
+    if (!adminData?.detailedScoringBreakdown) {
+      setNotificationType('error');
+      setNotificationTitle('❌ No Data Available');
+      setNotificationMessage('No scoring data available to export.');
+      setShowNotification(true);
+      setTimeout(() => setShowNotification(false), 5000);
+      return;
+    }
+
+    try {
+      // Dynamically import xlsx to avoid SSR issues
+      const XLSX = await import('xlsx');
+      const timestamp = new Date().toISOString().slice(0, 19).replace(/:/g, '-');
+      
+      // Create workbook
+      const workbook = XLSX.utils.book_new();
+      
+      // Helper function to create worksheet data
+      const createWorksheetData = (phaseData: any[], phaseName: string) => {
+        const data = [];
+        
+        // Add header row
+        const headerRow = ['Role', 'Participant', 'Number'];
+        judges.forEach(judge => {
+          headerRow.push(`${judge.name} (${judge.role})`);
+        });
+        headerRow.push('Total Score', 'Number of Scores');
+        data.push(headerRow);
+        
+        // Add data rows
+        phaseData.forEach((participant: any) => {
+          const row = [
+            participant.role === 'leader' ? 'Leader' : 'Follower',
+            participant.name,
+            participant.number
+          ];
+          
+          // Add judge scores
+          judges.forEach(judge => {
+            const judgeScore = participant.scores.find((s: any) => s.judgeName === judge.name);
+            row.push(judgeScore ? judgeScore.score : '');
+          });
+          
+          // Add totals
+          const totalScore = participant.scores.reduce((sum: number, s: any) => sum + s.score, 0);
+          row.push(totalScore, participant.scores.length);
+          
+          data.push(row);
+        });
+        
+        return data;
+      };
+      
+      // Create Heats worksheets
+      if (adminData.detailedScoringBreakdown.heats) {
+        adminData.detailedScoringBreakdown.heats.forEach((heat: any) => {
+          const heatData = createWorksheetData(heat.participants, `Heat ${heat.heatNumber}`);
+          const worksheet = XLSX.utils.aoa_to_sheet(heatData);
+          
+          // Set column widths
+          const colWidths = [
+            { wch: 10 }, // Role
+            { wch: 20 }, // Participant
+            { wch: 8 },  // Number
+          ];
+          judges.forEach(() => colWidths.push({ wch: 12 })); // Judge columns
+          colWidths.push({ wch: 12 }, { wch: 15 }); // Total Score, Number of Scores
+          worksheet['!cols'] = colWidths;
+          
+          XLSX.utils.book_append_sheet(workbook, worksheet, `Heat ${heat.heatNumber}`);
+        });
+      }
+      
+      // Create Semifinal worksheet
+      if (adminData.detailedScoringBreakdown.semifinal) {
+        const semifinalData = createWorksheetData(adminData.detailedScoringBreakdown.semifinal, 'Semifinal');
+        const semifinalWorksheet = XLSX.utils.aoa_to_sheet(semifinalData);
+        
+        // Set column widths
+        const colWidths = [
+          { wch: 10 }, // Role
+          { wch: 20 }, // Participant
+          { wch: 8 },  // Number
+        ];
+        judges.forEach(() => colWidths.push({ wch: 12 })); // Judge columns
+        colWidths.push({ wch: 12 }, { wch: 15 }); // Total Score, Number of Scores
+        semifinalWorksheet['!cols'] = colWidths;
+        
+        XLSX.utils.book_append_sheet(workbook, semifinalWorksheet, 'Semifinal');
+      }
+      
+      // Create Final worksheet
+      if (adminData.detailedScoringBreakdown.final) {
+        const finalData = createWorksheetData(adminData.detailedScoringBreakdown.final, 'Final');
+        const finalWorksheet = XLSX.utils.aoa_to_sheet(finalData);
+        
+        // Set column widths
+        const colWidths = [
+          { wch: 10 }, // Role
+          { wch: 20 }, // Participant
+          { wch: 8 },  // Number
+        ];
+        judges.forEach(() => colWidths.push({ wch: 12 })); // Judge columns
+        colWidths.push({ wch: 12 }, { wch: 15 }); // Total Score, Number of Scores
+        finalWorksheet['!cols'] = colWidths;
+        
+        XLSX.utils.book_append_sheet(workbook, finalWorksheet, 'Final');
+      }
+      
+      // Create Summary worksheet
+      const summaryData = [];
+      summaryData.push(['Dance Competition Scoring Summary']);
+      summaryData.push(['']);
+      summaryData.push(['Generated:', new Date().toLocaleString()]);
+      summaryData.push(['']);
+      summaryData.push(['Phase', 'Role', 'Participant Count', 'Total Scores']);
+      
+      let totalParticipants = 0;
+      let totalScores = 0;
+      
+      if (adminData.detailedScoringBreakdown.heats) {
+        adminData.detailedScoringBreakdown.heats.forEach((heat: any) => {
+          const leaders = heat.participants.filter((p: any) => p.role === 'leader');
+          const followers = heat.participants.filter((p: any) => p.role === 'follower');
+          
+          summaryData.push([`Heat ${heat.heatNumber}`, 'Leaders', leaders.length, leaders.reduce((sum: number, p: any) => sum + p.scores.length, 0)]);
+          summaryData.push([`Heat ${heat.heatNumber}`, 'Followers', followers.length, followers.reduce((sum: number, p: any) => sum + p.scores.length, 0)]);
+          
+          totalParticipants += leaders.length + followers.length;
+          totalScores += leaders.reduce((sum: number, p: any) => sum + p.scores.length, 0) + 
+                        followers.reduce((sum: number, p: any) => sum + p.scores.length, 0);
+        });
+      }
+      
+      if (adminData.detailedScoringBreakdown.semifinal) {
+        const semifinalLeaders = adminData.detailedScoringBreakdown.semifinal.filter((p: any) => p.role === 'leader');
+        const semifinalFollowers = adminData.detailedScoringBreakdown.semifinal.filter((p: any) => p.role === 'follower');
+        
+        summaryData.push(['Semifinal', 'Leaders', semifinalLeaders.length, semifinalLeaders.reduce((sum: number, p: any) => sum + p.scores.length, 0)]);
+        summaryData.push(['Semifinal', 'Followers', semifinalFollowers.length, semifinalFollowers.reduce((sum: number, p: any) => sum + p.scores.length, 0)]);
+        
+        totalParticipants += semifinalLeaders.length + semifinalFollowers.length;
+        totalScores += semifinalLeaders.reduce((sum: number, p: any) => sum + p.scores.length, 0) + 
+                      semifinalFollowers.reduce((sum: number, p: any) => sum + p.scores.length, 0);
+      }
+      
+      if (adminData.detailedScoringBreakdown.final) {
+        const finalLeaders = adminData.detailedScoringBreakdown.final.filter((p: any) => p.role === 'leader');
+        const finalFollowers = adminData.detailedScoringBreakdown.final.filter((p: any) => p.role === 'follower');
+        
+        summaryData.push(['Final', 'Leaders', finalLeaders.length, finalLeaders.reduce((sum: number, p: any) => sum + p.scores.length, 0)]);
+        summaryData.push(['Final', 'Followers', finalFollowers.length, finalFollowers.reduce((sum: number, p: any) => sum + p.scores.length, 0)]);
+        
+        totalParticipants += finalLeaders.length + finalFollowers.length;
+        totalScores += finalLeaders.reduce((sum: number, p: any) => sum + p.scores.length, 0) + 
+                      finalFollowers.reduce((sum: number, p: any) => sum + p.scores.length, 0);
+      }
+      
+      summaryData.push(['']);
+      summaryData.push(['TOTAL', '', totalParticipants, totalScores]);
+      
+      const summaryWorksheet = XLSX.utils.aoa_to_sheet(summaryData);
+      summaryWorksheet['!cols'] = [
+        { wch: 15 }, // Phase
+        { wch: 12 }, // Role
+        { wch: 15 }, // Participant Count
+        { wch: 15 }  // Total Scores
+      ];
+      
+      XLSX.utils.book_append_sheet(workbook, summaryWorksheet, 'Summary');
+      
+      // Generate and download file
+      const excelBuffer = XLSX.write(workbook, { bookType: 'xlsx', type: 'array' });
+      const blob = new Blob([excelBuffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+      const link = document.createElement('a');
+      const url = URL.createObjectURL(blob);
+      link.setAttribute('href', url);
+      link.setAttribute('download', `dance-competition-scores-${timestamp}.xlsx`);
+      link.style.visibility = 'hidden';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+
+      // Show success notification
+      setNotificationType('success');
+      setNotificationTitle('✅ Export Successful!');
+      setNotificationMessage('Scoring data has been exported to Excel file.');
+      setShowNotification(true);
+      setTimeout(() => setShowNotification(false), 5000);
+
+    } catch (error) {
+      console.error('Export error:', error);
+      setNotificationType('error');
+      setNotificationTitle('❌ Export Failed');
+      setNotificationMessage('Failed to export data. Please try again.');
+      setShowNotification(true);
+      setTimeout(() => setShowNotification(false), 5000);
+    }
+  };
+
   const leaders = participants.filter(p => p.role === 'leader');
   const followers = participants.filter(p => p.role === 'follower');
   const state = getCompetitionState();
@@ -552,6 +753,16 @@ export default function AdminDashboard({ user, onLogout }: AdminDashboardProps) 
               }`}
             >
               🏆 Competition
+            </button>
+            <button
+              onClick={() => setActiveTab('scoring-table')}
+              className={`px-6 py-3 rounded-full text-lg font-medium transition-all duration-300 ${
+                activeTab === 'scoring-table' 
+                  ? 'bg-purple-500/30 text-purple-200 border border-purple-400/50' 
+                  : 'bg-white/10 text-white/60 hover:bg-white/20'
+              }`}
+            >
+              📊 Scoring Table
             </button>
             <button
               onClick={() => setActiveTab('results')}
@@ -1480,13 +1691,23 @@ export default function AdminDashboard({ user, onLogout }: AdminDashboardProps) 
                         .filter((p: any) => p.role === 'leader')
                         .map((participant: any, index: number) => (
                           <div key={participant.id} className="bg-gradient-to-r from-blue-500/20 to-blue-600/20 rounded-xl p-4 border border-blue-400/30">
-                            <div className="flex items-center space-x-4">
-                              <div className="w-12 h-12 bg-blue-500/50 rounded-full flex items-center justify-center text-white font-bold text-lg">
-                                {index + 1}
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center space-x-4">
+                                <div className="w-12 h-12 bg-blue-500/50 rounded-full flex items-center justify-center text-white font-bold text-lg">
+                                  {index + 1}
+                                </div>
+                                <div>
+                                  <div className="font-bold text-white">{participant.name}</div>
+                                  <div className="text-blue-300 text-sm">#{participant.number}</div>
+                                </div>
                               </div>
-                              <div>
-                                <div className="font-bold text-white">{participant.name}</div>
-                                <div className="text-blue-300 text-sm">#{participant.number}</div>
+                              <div className="text-right">
+                                <div className="text-yellow-300 font-bold text-lg">
+                                  {participant.totalScore || 0}
+                                </div>
+                                <div className="text-blue-300 text-xs">
+                                  {participant.totalScores || 0} scores
+                                </div>
                               </div>
                             </div>
                           </div>
@@ -1503,13 +1724,23 @@ export default function AdminDashboard({ user, onLogout }: AdminDashboardProps) 
                         .filter((p: any) => p.role === 'follower')
                         .map((participant: any, index: number) => (
                           <div key={participant.id} className="bg-gradient-to-r from-pink-500/20 to-pink-600/20 rounded-xl p-4 border border-pink-400/30">
-                            <div className="flex items-center space-x-4">
-                              <div className="w-12 h-12 bg-pink-500/50 rounded-full flex items-center justify-center text-white font-bold text-lg">
-                                {index + 1}
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center space-x-4">
+                                <div className="w-12 h-12 bg-pink-500/50 rounded-full flex items-center justify-center text-white font-bold text-lg">
+                                  {index + 1}
+                                </div>
+                                <div>
+                                  <div className="font-bold text-white">{participant.name}</div>
+                                  <div className="text-pink-300 text-sm">#{participant.number}</div>
+                                </div>
                               </div>
-                              <div>
-                                <div className="font-bold text-white">{participant.name}</div>
-                                <div className="text-pink-300 text-sm">#{participant.number}</div>
+                              <div className="text-right">
+                                <div className="text-yellow-300 font-bold text-lg">
+                                  {participant.totalScore || 0}
+                                </div>
+                                <div className="text-pink-300 text-xs">
+                                  {participant.totalScores || 0} scores
+                                </div>
                               </div>
                             </div>
                           </div>
@@ -1538,13 +1769,23 @@ export default function AdminDashboard({ user, onLogout }: AdminDashboardProps) 
                         .filter((p: any) => p.role === 'leader')
                         .map((participant: any, index: number) => (
                           <div key={participant.id} className="bg-gradient-to-r from-yellow-500/20 to-orange-600/20 rounded-xl p-4 border border-yellow-400/30">
-                            <div className="flex items-center space-x-4">
-                              <div className="w-12 h-12 bg-yellow-500/50 rounded-full flex items-center justify-center text-white font-bold text-lg">
-                                {index + 1}
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center space-x-4">
+                                <div className="w-12 h-12 bg-yellow-500/50 rounded-full flex items-center justify-center text-white font-bold text-lg">
+                                  {index + 1}
+                                </div>
+                                <div>
+                                  <div className="font-bold text-white">{participant.name}</div>
+                                  <div className="text-yellow-300 text-sm">#{participant.number}</div>
+                                </div>
                               </div>
-                              <div>
-                                <div className="font-bold text-white">{participant.name}</div>
-                                <div className="text-yellow-300 text-sm">#{participant.number}</div>
+                              <div className="text-right">
+                                <div className="text-yellow-300 font-bold text-lg">
+                                  {participant.totalScore || 0}
+                                </div>
+                                <div className="text-yellow-300 text-xs">
+                                  {participant.totalScores || 0} scores
+                                </div>
                               </div>
                             </div>
                           </div>
@@ -1561,13 +1802,23 @@ export default function AdminDashboard({ user, onLogout }: AdminDashboardProps) 
                         .filter((p: any) => p.role === 'follower')
                         .map((participant: any, index: number) => (
                           <div key={participant.id} className="bg-gradient-to-r from-orange-500/20 to-red-600/20 rounded-xl p-4 border border-orange-400/30">
-                            <div className="flex items-center space-x-4">
-                              <div className="w-12 h-12 bg-orange-500/50 rounded-full flex items-center justify-center text-white font-bold text-lg">
-                                {index + 1}
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center space-x-4">
+                                <div className="w-12 h-12 bg-orange-500/50 rounded-full flex items-center justify-center text-white font-bold text-lg">
+                                  {index + 1}
+                                </div>
+                                <div>
+                                  <div className="font-bold text-white">{participant.name}</div>
+                                  <div className="text-orange-300 text-sm">#{participant.number}</div>
+                                </div>
                               </div>
-                              <div>
-                                <div className="font-bold text-white">{participant.name}</div>
-                                <div className="text-orange-300 text-sm">#{participant.number}</div>
+                              <div className="text-right">
+                                <div className="text-yellow-300 font-bold text-lg">
+                                  {participant.totalScore || 0}
+                                </div>
+                                <div className="text-orange-300 text-xs">
+                                  {participant.totalScores || 0} scores
+                                </div>
                               </div>
                             </div>
                           </div>
@@ -1714,62 +1965,63 @@ export default function AdminDashboard({ user, onLogout }: AdminDashboardProps) 
               </div>
             )}
 
+
             {/* Heat Results */}
             {adminData?.heatResults && adminData.heatResults.length > 0 && (
-              <div className="bg-white/10 backdrop-blur-lg rounded-2xl p-8 border border-white/20">
-                <h3 className="text-2xl font-bold text-white mb-6 flex items-center">
-                  <span className="mr-3">📊</span>
-                  Heat Results
-                </h3>
+              <div className="mb-8">
+                <h4 className="text-lg font-bold text-green-300 mb-4">Individual Heat Results</h4>
                 <div className="space-y-6">
-                  {adminData.heatResults.map((heat: any) => (
-                    <div key={heat.id} className="bg-white/10 rounded-xl p-6 border border-white/20">
+                  {adminData.heatResults.map((heat: any, index: number) => (
+                    <div key={index} className="bg-white/10 rounded-xl p-6 border border-white/20">
                       <div className="flex items-center justify-between mb-4">
-                        <h4 className="text-xl font-bold text-white flex items-center">
-                          <span className="mr-2">🔥</span>
-                          Heat {heat.number}
-                          {heat.isActive && (
-                            <span className="ml-3 px-3 py-1 bg-green-500/30 text-green-200 rounded-full text-sm border border-green-400/50">
-                              ACTIVE
-                            </span>
-                          )}
-                        </h4>
-                        <div className="flex space-x-2">
-                          {!heat.isActive && (
+                        <h5 className="text-xl font-bold text-white">Heat {heat.number}</h5>
+                        <div className="flex items-center space-x-4">
+                          <div className="text-sm text-white/60">
+                            {heat.totalScores || 0} scores submitted
+                          </div>
+                          {heat.isActive ? (
+                            <div className="inline-flex items-center px-3 py-1 bg-green-500/30 rounded-full text-green-200 text-sm font-medium">
+                              <span className="w-2 h-2 bg-green-400 rounded-full mr-2"></span>
+                              Active
+                            </div>
+                          ) : (
                             <button
                               onClick={() => setActiveHeat(heat.id)}
-                              className="px-4 py-2 bg-blue-500/50 text-blue-200 rounded-lg text-sm hover:bg-blue-500/70 transition-colors"
+                              className="px-4 py-2 bg-gradient-to-r from-orange-400 to-red-500 text-white font-semibold rounded-lg hover:from-orange-500 hover:to-red-600 transition-all duration-300 transform hover:scale-105 shadow-lg"
                             >
-                              Activate Heat
+                              🎯 Activate Heat
                             </button>
                           )}
-                          <div className="text-white/60 text-sm">
-                            {heat.totalScores} scores submitted
-                          </div>
                         </div>
                       </div>
                       
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                         {/* Leaders */}
                         <div>
-                          <h5 className="text-lg font-semibold text-blue-300 mb-3">🕺 Leaders</h5>
+                          <h6 className="text-md font-semibold text-blue-300 mb-3">🕺 Leaders</h6>
                           <div className="space-y-2">
                             {heat.participants
                               .filter((p: any) => p.role === 'leader')
-                              .map((participant: any, index: number) => (
-                                <div key={participant.id} className="flex items-center justify-between bg-white/5 rounded-lg p-3">
-                                  <div className="flex items-center space-x-3">
-                                    <div className="w-8 h-8 bg-blue-500/30 rounded-full flex items-center justify-center text-blue-300 font-bold text-sm">
-                                      {index + 1}
+                              .map((participant: any, participantIndex: number) => (
+                                <div key={participant.id} className="bg-blue-500/10 rounded-lg p-3 border border-blue-400/30">
+                                  <div className="flex items-center justify-between mb-2">
+                                    <div className="flex items-center space-x-3">
+                                      <div className="w-8 h-8 bg-blue-500/50 rounded-full flex items-center justify-center text-white font-bold text-sm">
+                                        {participantIndex + 1}
+                                      </div>
+                                      <div>
+                                        <div className="font-semibold text-white">{participant.name}</div>
+                                        <div className="text-blue-300 text-sm">#{participant.number}</div>
+                                      </div>
                                     </div>
-                                    <div>
-                                      <div className="text-white font-medium">{participant.name}</div>
-                                      <div className="text-white/60 text-sm">#{participant.number}</div>
+                                    <div className="text-right">
+                                      <div className="text-yellow-300 font-bold text-lg">
+                                        {participant.totalScore}
+                                      </div>
+                                      <div className="text-blue-300 text-xs">
+                                        {participant.totalScores} scores
+                                      </div>
                                     </div>
-                                  </div>
-                                  <div className="text-right">
-                                    <div className="text-white font-bold">{participant.averageScore}</div>
-                                    <div className="text-white/60 text-xs">{participant.totalScores} scores</div>
                                   </div>
                                 </div>
                               ))}
@@ -1778,24 +2030,30 @@ export default function AdminDashboard({ user, onLogout }: AdminDashboardProps) 
                         
                         {/* Followers */}
                         <div>
-                          <h5 className="text-lg font-semibold text-pink-300 mb-3">💃 Followers</h5>
+                          <h6 className="text-md font-semibold text-pink-300 mb-3">💃 Followers</h6>
                           <div className="space-y-2">
                             {heat.participants
                               .filter((p: any) => p.role === 'follower')
-                              .map((participant: any, index: number) => (
-                                <div key={participant.id} className="flex items-center justify-between bg-white/5 rounded-lg p-3">
-                                  <div className="flex items-center space-x-3">
-                                    <div className="w-8 h-8 bg-pink-500/30 rounded-full flex items-center justify-center text-pink-300 font-bold text-sm">
-                                      {index + 1}
+                              .map((participant: any, participantIndex: number) => (
+                                <div key={participant.id} className="bg-pink-500/10 rounded-lg p-3 border border-pink-400/30">
+                                  <div className="flex items-center justify-between mb-2">
+                                    <div className="flex items-center space-x-3">
+                                      <div className="w-8 h-8 bg-pink-500/50 rounded-full flex items-center justify-center text-white font-bold text-sm">
+                                        {participantIndex + 1}
+                                      </div>
+                                      <div>
+                                        <div className="font-semibold text-white">{participant.name}</div>
+                                        <div className="text-pink-300 text-sm">#{participant.number}</div>
+                                      </div>
                                     </div>
-                                    <div>
-                                      <div className="text-white font-medium">{participant.name}</div>
-                                      <div className="text-white/60 text-sm">#{participant.number}</div>
+                                    <div className="text-right">
+                                      <div className="text-yellow-300 font-bold text-lg">
+                                        {participant.totalScore}
+                                      </div>
+                                      <div className="text-pink-300 text-xs">
+                                        {participant.totalScores} scores
+                                      </div>
                                     </div>
-                                  </div>
-                                  <div className="text-right">
-                                    <div className="text-white font-bold">{participant.averageScore}</div>
-                                    <div className="text-white/60 text-xs">{participant.totalScores} scores</div>
                                   </div>
                                 </div>
                               ))}
@@ -1805,6 +2063,266 @@ export default function AdminDashboard({ user, onLogout }: AdminDashboardProps) 
                     </div>
                   ))}
                 </div>
+              </div>
+            )}
+
+            {/* Judge Scoring Details - Individual Judge Scores */}
+            {adminData?.detailedScoringBreakdown && (
+              <div className="mb-8">
+                <h4 className="text-lg font-bold text-purple-300 mb-4 flex items-center">
+                  <span className="mr-2">📊</span>
+                  Judge Scoring Details - Individual Scores
+                </h4>
+                <p className="text-purple-200 text-sm mb-4">
+                  See exactly what score each judge gave to each participant
+                </p>
+                
+                {/* Heat Scores */}
+                {adminData.detailedScoringBreakdown.heats && adminData.detailedScoringBreakdown.heats.length > 0 && (
+                  <div className="mb-6">
+                    <h5 className="text-md font-bold text-green-300 mb-3">🔥 Heat Scores</h5>
+                    <div className="space-y-4">
+                      {adminData.detailedScoringBreakdown.heats.map((heat: any) => (
+                        <div key={heat.heatId} className="bg-white/10 rounded-xl p-4 border border-white/20">
+                          <h6 className="text-lg font-semibold text-white mb-3">Heat {heat.heatNumber}</h6>
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            {/* Leaders */}
+                            <div>
+                              <h6 className="text-sm font-semibold text-blue-300 mb-2">🕺 Leaders</h6>
+                              <div className="space-y-2">
+                                {heat.participants
+                                  .filter((p: any) => p.role === 'leader')
+                                  .map((participant: any) => (
+                                    <div key={participant.id} className="bg-blue-500/10 rounded-lg p-3 border border-blue-400/30">
+                                      <div className="flex items-center justify-between mb-2">
+                                        <div>
+                                          <div className="font-semibold text-white">{participant.name}</div>
+                                          <div className="text-blue-300 text-sm">#{participant.number}</div>
+                                        </div>
+                                        <div className="text-right">
+                                          <div className="text-yellow-300 font-bold">
+                                            {participant.scores.reduce((sum: number, s: any) => sum + s.score, 0)}
+                                          </div>
+                                          <div className="text-blue-300 text-xs">{participant.scores.length} scores</div>
+                                        </div>
+                                      </div>
+                                      <div className="space-y-1">
+                                        {participant.scores.map((score: any, index: number) => (
+                                          <div key={index} className="flex items-center justify-between text-xs">
+                                            <div className="flex items-center space-x-2">
+                                              <span className={`w-2 h-2 rounded-full ${score.judgeRole === 'leader' ? 'bg-blue-400' : 'bg-pink-400'}`}></span>
+                                              <span className="text-white/80">{score.judgeName}</span>
+                                            </div>
+                                            <span className="text-yellow-300 font-semibold">{score.score}</span>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    </div>
+                                  ))}
+                              </div>
+                            </div>
+                            
+                            {/* Followers */}
+                            <div>
+                              <h6 className="text-sm font-semibold text-pink-300 mb-2">💃 Followers</h6>
+                              <div className="space-y-2">
+                                {heat.participants
+                                  .filter((p: any) => p.role === 'follower')
+                                  .map((participant: any) => (
+                                    <div key={participant.id} className="bg-pink-500/10 rounded-lg p-3 border border-pink-400/30">
+                                      <div className="flex items-center justify-between mb-2">
+                                        <div>
+                                          <div className="font-semibold text-white">{participant.name}</div>
+                                          <div className="text-pink-300 text-sm">#{participant.number}</div>
+                                        </div>
+                                        <div className="text-right">
+                                          <div className="text-yellow-300 font-bold">
+                                            {participant.scores.reduce((sum: number, s: any) => sum + s.score, 0)}
+                                          </div>
+                                          <div className="text-pink-300 text-xs">{participant.scores.length} scores</div>
+                                        </div>
+                                      </div>
+                                      <div className="space-y-1">
+                                        {participant.scores.map((score: any, index: number) => (
+                                          <div key={index} className="flex items-center justify-between text-xs">
+                                            <div className="flex items-center space-x-2">
+                                              <span className={`w-2 h-2 rounded-full ${score.judgeRole === 'leader' ? 'bg-blue-400' : 'bg-pink-400'}`}></span>
+                                              <span className="text-white/80">{score.judgeName}</span>
+                                            </div>
+                                            <span className="text-yellow-300 font-semibold">{score.score}</span>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    </div>
+                                  ))}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Semifinal Scores */}
+                {adminData.detailedScoringBreakdown.semifinal && adminData.detailedScoringBreakdown.semifinal.length > 0 && (
+                  <div className="mb-6">
+                    <h5 className="text-md font-bold text-purple-300 mb-3">🥈 Semifinal Scores</h5>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      {/* Leaders */}
+                      <div>
+                        <h6 className="text-sm font-semibold text-blue-300 mb-2">🕺 Leaders</h6>
+                        <div className="space-y-2">
+                          {adminData.detailedScoringBreakdown.semifinal
+                            .filter((p: any) => p.role === 'leader')
+                            .map((participant: any) => (
+                              <div key={participant.id} className="bg-purple-500/10 rounded-lg p-3 border border-purple-400/30">
+                                <div className="flex items-center justify-between mb-2">
+                                  <div>
+                                    <div className="font-semibold text-white">{participant.name}</div>
+                                    <div className="text-blue-300 text-sm">#{participant.number}</div>
+                                  </div>
+                                  <div className="text-right">
+                                    <div className="text-yellow-300 font-bold">
+                                      {participant.scores.reduce((sum: number, s: any) => sum + s.score, 0)}
+                                    </div>
+                                    <div className="text-purple-300 text-xs">{participant.scores.length} scores</div>
+                                  </div>
+                                </div>
+                                <div className="space-y-1">
+                                  {participant.scores.map((score: any, index: number) => (
+                                    <div key={index} className="flex items-center justify-between text-xs">
+                                      <div className="flex items-center space-x-2">
+                                        <span className={`w-2 h-2 rounded-full ${score.judgeRole === 'leader' ? 'bg-blue-400' : 'bg-pink-400'}`}></span>
+                                        <span className="text-white/80">{score.judgeName}</span>
+                                      </div>
+                                      <span className="text-yellow-300 font-semibold">{score.score}</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            ))}
+                        </div>
+                      </div>
+                      
+                      {/* Followers */}
+                      <div>
+                        <h6 className="text-sm font-semibold text-pink-300 mb-2">💃 Followers</h6>
+                        <div className="space-y-2">
+                          {adminData.detailedScoringBreakdown.semifinal
+                            .filter((p: any) => p.role === 'follower')
+                            .map((participant: any) => (
+                              <div key={participant.id} className="bg-purple-500/10 rounded-lg p-3 border border-purple-400/30">
+                                <div className="flex items-center justify-between mb-2">
+                                  <div>
+                                    <div className="font-semibold text-white">{participant.name}</div>
+                                    <div className="text-pink-300 text-sm">#{participant.number}</div>
+                                  </div>
+                                  <div className="text-right">
+                                    <div className="text-yellow-300 font-bold">
+                                      {participant.scores.reduce((sum: number, s: any) => sum + s.score, 0)}
+                                    </div>
+                                    <div className="text-purple-300 text-xs">{participant.scores.length} scores</div>
+                                  </div>
+                                </div>
+                                <div className="space-y-1">
+                                  {participant.scores.map((score: any, index: number) => (
+                                    <div key={index} className="flex items-center justify-between text-xs">
+                                      <div className="flex items-center space-x-2">
+                                        <span className={`w-2 h-2 rounded-full ${score.judgeRole === 'leader' ? 'bg-blue-400' : 'bg-pink-400'}`}></span>
+                                        <span className="text-white/80">{score.judgeName}</span>
+                                      </div>
+                                      <span className="text-yellow-300 font-semibold">{score.score}</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            ))}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Final Scores */}
+                {adminData.detailedScoringBreakdown.final && adminData.detailedScoringBreakdown.final.length > 0 && (
+                  <div className="mb-6">
+                    <h5 className="text-md font-bold text-orange-300 mb-3">🏆 Final Scores</h5>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      {/* Leaders */}
+                      <div>
+                        <h6 className="text-sm font-semibold text-blue-300 mb-2">🕺 Leaders</h6>
+                        <div className="space-y-2">
+                          {adminData.detailedScoringBreakdown.final
+                            .filter((p: any) => p.role === 'leader')
+                            .map((participant: any) => (
+                              <div key={participant.id} className="bg-orange-500/10 rounded-lg p-3 border border-orange-400/30">
+                                <div className="flex items-center justify-between mb-2">
+                                  <div>
+                                    <div className="font-semibold text-white">{participant.name}</div>
+                                    <div className="text-blue-300 text-sm">#{participant.number}</div>
+                                  </div>
+                                  <div className="text-right">
+                                    <div className="text-yellow-300 font-bold">
+                                      {participant.scores.reduce((sum: number, s: any) => sum + s.score, 0)}
+                                    </div>
+                                    <div className="text-orange-300 text-xs">{participant.scores.length} scores</div>
+                                  </div>
+                                </div>
+                                <div className="space-y-1">
+                                  {participant.scores.map((score: any, index: number) => (
+                                    <div key={index} className="flex items-center justify-between text-xs">
+                                      <div className="flex items-center space-x-2">
+                                        <span className={`w-2 h-2 rounded-full ${score.judgeRole === 'leader' ? 'bg-blue-400' : 'bg-pink-400'}`}></span>
+                                        <span className="text-white/80">{score.judgeName}</span>
+                                      </div>
+                                      <span className="text-yellow-300 font-semibold">{score.score}</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            ))}
+                        </div>
+                      </div>
+                      
+                      {/* Followers */}
+                      <div>
+                        <h6 className="text-sm font-semibold text-pink-300 mb-2">💃 Followers</h6>
+                        <div className="space-y-2">
+                          {adminData.detailedScoringBreakdown.final
+                            .filter((p: any) => p.role === 'follower')
+                            .map((participant: any) => (
+                              <div key={participant.id} className="bg-orange-500/10 rounded-lg p-3 border border-orange-400/30">
+                                <div className="flex items-center justify-between mb-2">
+                                  <div>
+                                    <div className="font-semibold text-white">{participant.name}</div>
+                                    <div className="text-pink-300 text-sm">#{participant.number}</div>
+                                  </div>
+                                  <div className="text-right">
+                                    <div className="text-yellow-300 font-bold">
+                                      {participant.scores.reduce((sum: number, s: any) => sum + s.score, 0)}
+                                    </div>
+                                    <div className="text-orange-300 text-xs">{participant.scores.length} scores</div>
+                                  </div>
+                                </div>
+                                <div className="space-y-1">
+                                  {participant.scores.map((score: any, index: number) => (
+                                    <div key={index} className="flex items-center justify-between text-xs">
+                                      <div className="flex items-center space-x-2">
+                                        <span className={`w-2 h-2 rounded-full ${score.judgeRole === 'leader' ? 'bg-blue-400' : 'bg-pink-400'}`}></span>
+                                        <span className="text-white/80">{score.judgeName}</span>
+                                      </div>
+                                      <span className="text-yellow-300 font-semibold">{score.score}</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            ))}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 
@@ -1843,6 +2361,439 @@ export default function AdminDashboard({ user, onLogout }: AdminDashboardProps) 
                 </div>
               </div>
             </div>
+          </div>
+        )}
+
+        {activeTab === 'scoring-table' && (
+          <div className="space-y-8">
+            {/* Scoring Table Header */}
+            <div className="bg-white/10 backdrop-blur-lg rounded-2xl p-8 border border-white/20">
+              <h2 className="text-3xl font-bold text-white mb-6 flex items-center">
+                <span className="mr-4 text-4xl">📊</span>
+                Scoring Table - All Judges & Participants
+              </h2>
+              <p className="text-white/80 text-lg mb-6">
+                View all scores in a table format with participants as rows and judges as columns
+              </p>
+              
+              {/* Export to Excel Button */}
+              <div className="flex justify-center">
+                <button
+                  onClick={() => exportToExcel()}
+                  className="px-8 py-4 bg-gradient-to-r from-green-400 to-blue-500 text-white font-bold rounded-xl hover:from-green-500 hover:to-blue-600 transition-all duration-300 transform hover:scale-105 shadow-xl border border-green-300/30 flex items-center space-x-3"
+                >
+                  <span className="text-2xl">📊</span>
+                  <span>Export to Excel (.xlsx)</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Heat Scoring Tables */}
+            {adminData?.detailedScoringBreakdown?.heats && adminData.detailedScoringBreakdown.heats.length > 0 && (
+              <div className="space-y-8">
+                {adminData.detailedScoringBreakdown.heats.map((heat: any) => (
+                  <div key={heat.heatId} className="bg-white/10 backdrop-blur-lg rounded-2xl p-8 border border-white/20">
+                    <h3 className="text-2xl font-bold text-white mb-6 flex items-center">
+                      <span className="mr-3">🔥</span>
+                      Heat {heat.heatNumber} - Scoring Table
+                    </h3>
+                    
+                    {/* Leaders Table */}
+                    <div className="mb-8">
+                      <h4 className="text-xl font-bold text-blue-300 mb-4 flex items-center">
+                        <span className="mr-2">🕺</span>
+                        Leaders
+                      </h4>
+                      <div className="overflow-x-auto">
+                        <table className="w-full bg-white/5 rounded-xl border border-white/20">
+                          <thead>
+                            <tr className="border-b border-white/20">
+                              <th className="px-4 py-3 text-left text-white font-semibold">Participant</th>
+                              <th className="px-4 py-3 text-center text-white font-semibold">#</th>
+                              {judges.map((judge) => (
+                                <th key={judge.id} className="px-4 py-3 text-center text-white font-semibold">
+                                  <div className="flex flex-col items-center">
+                                    <span className="text-sm">{judge.name}</span>
+                                    <span className={`text-xs px-2 py-1 rounded-full ${judge.role === 'leader' ? 'bg-blue-500/30 text-blue-200' : 'bg-pink-500/30 text-pink-200'}`}>
+                                      {judge.role}
+                                    </span>
+                                  </div>
+                                </th>
+                              ))}
+                              <th className="px-4 py-3 text-center text-white font-semibold">Total</th>
+                              <th className="px-4 py-3 text-center text-white font-semibold">Scores</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {heat.participants
+                              .filter((p: any) => p.role === 'leader')
+                              .map((participant: any) => (
+                                <tr key={participant.id} className="border-b border-white/10 hover:bg-white/5">
+                                  <td className="px-4 py-3 text-white font-semibold">{participant.name}</td>
+                                  <td className="px-4 py-3 text-center text-white/80">#{participant.number}</td>
+                                  {judges.map((judge) => {
+                                    const judgeScore = participant.scores.find((s: any) => s.judgeName === judge.name);
+                                    return (
+                                      <td key={judge.id} className="px-4 py-3 text-center">
+                                        {judgeScore ? (
+                                          <span className="text-yellow-300 font-bold text-lg">{judgeScore.score}</span>
+                                        ) : (
+                                          <span className="text-white/40">-</span>
+                                        )}
+                                      </td>
+                                    );
+                                  })}
+                                  <td className="px-4 py-3 text-center">
+                                    <span className="text-yellow-300 font-bold text-lg">
+                                      {participant.scores.reduce((sum: number, s: any) => sum + s.score, 0)}
+                                    </span>
+                                  </td>
+                                  <td className="px-4 py-3 text-center">
+                                    <span className="text-white/60 text-sm">{participant.scores.length}</span>
+                                  </td>
+                                </tr>
+                              ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+
+                    {/* Followers Table */}
+                    <div>
+                      <h4 className="text-xl font-bold text-pink-300 mb-4 flex items-center">
+                        <span className="mr-2">💃</span>
+                        Followers
+                      </h4>
+                      <div className="overflow-x-auto">
+                        <table className="w-full bg-white/5 rounded-xl border border-white/20">
+                          <thead>
+                            <tr className="border-b border-white/20">
+                              <th className="px-4 py-3 text-left text-white font-semibold">Participant</th>
+                              <th className="px-4 py-3 text-center text-white font-semibold">#</th>
+                              {judges.map((judge) => (
+                                <th key={judge.id} className="px-4 py-3 text-center text-white font-semibold">
+                                  <div className="flex flex-col items-center">
+                                    <span className="text-sm">{judge.name}</span>
+                                    <span className={`text-xs px-2 py-1 rounded-full ${judge.role === 'leader' ? 'bg-blue-500/30 text-blue-200' : 'bg-pink-500/30 text-pink-200'}`}>
+                                      {judge.role}
+                                    </span>
+                                  </div>
+                                </th>
+                              ))}
+                              <th className="px-4 py-3 text-center text-white font-semibold">Total</th>
+                              <th className="px-4 py-3 text-center text-white font-semibold">Scores</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {heat.participants
+                              .filter((p: any) => p.role === 'follower')
+                              .map((participant: any) => (
+                                <tr key={participant.id} className="border-b border-white/10 hover:bg-white/5">
+                                  <td className="px-4 py-3 text-white font-semibold">{participant.name}</td>
+                                  <td className="px-4 py-3 text-center text-white/80">#{participant.number}</td>
+                                  {judges.map((judge) => {
+                                    const judgeScore = participant.scores.find((s: any) => s.judgeName === judge.name);
+                                    return (
+                                      <td key={judge.id} className="px-4 py-3 text-center">
+                                        {judgeScore ? (
+                                          <span className="text-yellow-300 font-bold text-lg">{judgeScore.score}</span>
+                                        ) : (
+                                          <span className="text-white/40">-</span>
+                                        )}
+                                      </td>
+                                    );
+                                  })}
+                                  <td className="px-4 py-3 text-center">
+                                    <span className="text-yellow-300 font-bold text-lg">
+                                      {participant.scores.reduce((sum: number, s: any) => sum + s.score, 0)}
+                                    </span>
+                                  </td>
+                                  <td className="px-4 py-3 text-center">
+                                    <span className="text-white/60 text-sm">{participant.scores.length}</span>
+                                  </td>
+                                </tr>
+                              ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Semifinal Scoring Table */}
+            {adminData?.detailedScoringBreakdown?.semifinal && adminData.detailedScoringBreakdown.semifinal.length > 0 && (
+              <div className="bg-white/10 backdrop-blur-lg rounded-2xl p-8 border border-white/20">
+                <h3 className="text-2xl font-bold text-white mb-6 flex items-center">
+                  <span className="mr-3">🥈</span>
+                  Semifinal - Scoring Table
+                </h3>
+                
+                {/* Leaders Table */}
+                <div className="mb-8">
+                  <h4 className="text-xl font-bold text-blue-300 mb-4 flex items-center">
+                    <span className="mr-2">🕺</span>
+                    Leaders
+                  </h4>
+                  <div className="overflow-x-auto">
+                    <table className="w-full bg-white/5 rounded-xl border border-white/20">
+                      <thead>
+                        <tr className="border-b border-white/20">
+                          <th className="px-4 py-3 text-left text-white font-semibold">Participant</th>
+                          <th className="px-4 py-3 text-center text-white font-semibold">#</th>
+                          {judges.map((judge) => (
+                            <th key={judge.id} className="px-4 py-3 text-center text-white font-semibold">
+                              <div className="flex flex-col items-center">
+                                <span className="text-sm">{judge.name}</span>
+                                <span className={`text-xs px-2 py-1 rounded-full ${judge.role === 'leader' ? 'bg-blue-500/30 text-blue-200' : 'bg-pink-500/30 text-pink-200'}`}>
+                                  {judge.role}
+                                </span>
+                              </div>
+                            </th>
+                          ))}
+                          <th className="px-4 py-3 text-center text-white font-semibold">Total</th>
+                          <th className="px-4 py-3 text-center text-white font-semibold">Scores</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {adminData.detailedScoringBreakdown.semifinal
+                          .filter((p: any) => p.role === 'leader')
+                          .map((participant: any) => (
+                            <tr key={participant.id} className="border-b border-white/10 hover:bg-white/5">
+                              <td className="px-4 py-3 text-white font-semibold">{participant.name}</td>
+                              <td className="px-4 py-3 text-center text-white/80">#{participant.number}</td>
+                              {judges.map((judge) => {
+                                const judgeScore = participant.scores.find((s: any) => s.judgeName === judge.name);
+                                return (
+                                  <td key={judge.id} className="px-4 py-3 text-center">
+                                    {judgeScore ? (
+                                      <span className="text-yellow-300 font-bold text-lg">{judgeScore.score}</span>
+                                    ) : (
+                                      <span className="text-white/40">-</span>
+                                    )}
+                                  </td>
+                                );
+                              })}
+                              <td className="px-4 py-3 text-center">
+                                <span className="text-yellow-300 font-bold text-lg">
+                                  {participant.scores.reduce((sum: number, s: any) => sum + s.score, 0)}
+                                </span>
+                              </td>
+                              <td className="px-4 py-3 text-center">
+                                <span className="text-white/60 text-sm">{participant.scores.length}</span>
+                              </td>
+                            </tr>
+                          ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                {/* Followers Table */}
+                <div>
+                  <h4 className="text-xl font-bold text-pink-300 mb-4 flex items-center">
+                    <span className="mr-2">💃</span>
+                    Followers
+                  </h4>
+                  <div className="overflow-x-auto">
+                    <table className="w-full bg-white/5 rounded-xl border border-white/20">
+                      <thead>
+                        <tr className="border-b border-white/20">
+                          <th className="px-4 py-3 text-left text-white font-semibold">Participant</th>
+                          <th className="px-4 py-3 text-center text-white font-semibold">#</th>
+                          {judges.map((judge) => (
+                            <th key={judge.id} className="px-4 py-3 text-center text-white font-semibold">
+                              <div className="flex flex-col items-center">
+                                <span className="text-sm">{judge.name}</span>
+                                <span className={`text-xs px-2 py-1 rounded-full ${judge.role === 'leader' ? 'bg-blue-500/30 text-blue-200' : 'bg-pink-500/30 text-pink-200'}`}>
+                                  {judge.role}
+                                </span>
+                              </div>
+                            </th>
+                          ))}
+                          <th className="px-4 py-3 text-center text-white font-semibold">Total</th>
+                          <th className="px-4 py-3 text-center text-white font-semibold">Scores</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {adminData.detailedScoringBreakdown.semifinal
+                          .filter((p: any) => p.role === 'follower')
+                          .map((participant: any) => (
+                            <tr key={participant.id} className="border-b border-white/10 hover:bg-white/5">
+                              <td className="px-4 py-3 text-white font-semibold">{participant.name}</td>
+                              <td className="px-4 py-3 text-center text-white/80">#{participant.number}</td>
+                              {judges.map((judge) => {
+                                const judgeScore = participant.scores.find((s: any) => s.judgeName === judge.name);
+                                return (
+                                  <td key={judge.id} className="px-4 py-3 text-center">
+                                    {judgeScore ? (
+                                      <span className="text-yellow-300 font-bold text-lg">{judgeScore.score}</span>
+                                    ) : (
+                                      <span className="text-white/40">-</span>
+                                    )}
+                                  </td>
+                                );
+                              })}
+                              <td className="px-4 py-3 text-center">
+                                <span className="text-yellow-300 font-bold text-lg">
+                                  {participant.scores.reduce((sum: number, s: any) => sum + s.score, 0)}
+                                </span>
+                              </td>
+                              <td className="px-4 py-3 text-center">
+                                <span className="text-white/60 text-sm">{participant.scores.length}</span>
+                              </td>
+                            </tr>
+                          ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Final Scoring Table */}
+            {adminData?.detailedScoringBreakdown?.final && adminData.detailedScoringBreakdown.final.length > 0 && (
+              <div className="bg-white/10 backdrop-blur-lg rounded-2xl p-8 border border-white/20">
+                <h3 className="text-2xl font-bold text-white mb-6 flex items-center">
+                  <span className="mr-3">🏆</span>
+                  Final - Scoring Table
+                </h3>
+                
+                {/* Leaders Table */}
+                <div className="mb-8">
+                  <h4 className="text-xl font-bold text-blue-300 mb-4 flex items-center">
+                    <span className="mr-2">🕺</span>
+                    Leaders
+                  </h4>
+                  <div className="overflow-x-auto">
+                    <table className="w-full bg-white/5 rounded-xl border border-white/20">
+                      <thead>
+                        <tr className="border-b border-white/20">
+                          <th className="px-4 py-3 text-left text-white font-semibold">Participant</th>
+                          <th className="px-4 py-3 text-center text-white font-semibold">#</th>
+                          {judges.map((judge) => (
+                            <th key={judge.id} className="px-4 py-3 text-center text-white font-semibold">
+                              <div className="flex flex-col items-center">
+                                <span className="text-sm">{judge.name}</span>
+                                <span className={`text-xs px-2 py-1 rounded-full ${judge.role === 'leader' ? 'bg-blue-500/30 text-blue-200' : 'bg-pink-500/30 text-pink-200'}`}>
+                                  {judge.role}
+                                </span>
+                              </div>
+                            </th>
+                          ))}
+                          <th className="px-4 py-3 text-center text-white font-semibold">Total</th>
+                          <th className="px-4 py-3 text-center text-white font-semibold">Scores</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {adminData.detailedScoringBreakdown.final
+                          .filter((p: any) => p.role === 'leader')
+                          .map((participant: any) => (
+                            <tr key={participant.id} className="border-b border-white/10 hover:bg-white/5">
+                              <td className="px-4 py-3 text-white font-semibold">{participant.name}</td>
+                              <td className="px-4 py-3 text-center text-white/80">#{participant.number}</td>
+                              {judges.map((judge) => {
+                                const judgeScore = participant.scores.find((s: any) => s.judgeName === judge.name);
+                                return (
+                                  <td key={judge.id} className="px-4 py-3 text-center">
+                                    {judgeScore ? (
+                                      <span className="text-yellow-300 font-bold text-lg">{judgeScore.score}</span>
+                                    ) : (
+                                      <span className="text-white/40">-</span>
+                                    )}
+                                  </td>
+                                );
+                              })}
+                              <td className="px-4 py-3 text-center">
+                                <span className="text-yellow-300 font-bold text-lg">
+                                  {participant.scores.reduce((sum: number, s: any) => sum + s.score, 0)}
+                                </span>
+                              </td>
+                              <td className="px-4 py-3 text-center">
+                                <span className="text-white/60 text-sm">{participant.scores.length}</span>
+                              </td>
+                            </tr>
+                          ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                {/* Followers Table */}
+                <div>
+                  <h4 className="text-xl font-bold text-pink-300 mb-4 flex items-center">
+                    <span className="mr-2">💃</span>
+                    Followers
+                  </h4>
+                  <div className="overflow-x-auto">
+                    <table className="w-full bg-white/5 rounded-xl border border-white/20">
+                      <thead>
+                        <tr className="border-b border-white/20">
+                          <th className="px-4 py-3 text-left text-white font-semibold">Participant</th>
+                          <th className="px-4 py-3 text-center text-white font-semibold">#</th>
+                          {judges.map((judge) => (
+                            <th key={judge.id} className="px-4 py-3 text-center text-white font-semibold">
+                              <div className="flex flex-col items-center">
+                                <span className="text-sm">{judge.name}</span>
+                                <span className={`text-xs px-2 py-1 rounded-full ${judge.role === 'leader' ? 'bg-blue-500/30 text-blue-200' : 'bg-pink-500/30 text-pink-200'}`}>
+                                  {judge.role}
+                                </span>
+                              </div>
+                            </th>
+                          ))}
+                          <th className="px-4 py-3 text-center text-white font-semibold">Total</th>
+                          <th className="px-4 py-3 text-center text-white font-semibold">Scores</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {adminData.detailedScoringBreakdown.final
+                          .filter((p: any) => p.role === 'follower')
+                          .map((participant: any) => (
+                            <tr key={participant.id} className="border-b border-white/10 hover:bg-white/5">
+                              <td className="px-4 py-3 text-white font-semibold">{participant.name}</td>
+                              <td className="px-4 py-3 text-center text-white/80">#{participant.number}</td>
+                              {judges.map((judge) => {
+                                const judgeScore = participant.scores.find((s: any) => s.judgeName === judge.name);
+                                return (
+                                  <td key={judge.id} className="px-4 py-3 text-center">
+                                    {judgeScore ? (
+                                      <span className="text-yellow-300 font-bold text-lg">{judgeScore.score}</span>
+                                    ) : (
+                                      <span className="text-white/40">-</span>
+                                    )}
+                                  </td>
+                                );
+                              })}
+                              <td className="px-4 py-3 text-center">
+                                <span className="text-yellow-300 font-bold text-lg">
+                                  {participant.scores.reduce((sum: number, s: any) => sum + s.score, 0)}
+                                </span>
+                              </td>
+                              <td className="px-4 py-3 text-center">
+                                <span className="text-white/60 text-sm">{participant.scores.length}</span>
+                              </td>
+                            </tr>
+                          ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* No Data Message */}
+            {(!adminData?.detailedScoringBreakdown?.heats || adminData.detailedScoringBreakdown.heats.length === 0) &&
+             (!adminData?.detailedScoringBreakdown?.semifinal || adminData.detailedScoringBreakdown.semifinal.length === 0) &&
+             (!adminData?.detailedScoringBreakdown?.final || adminData.detailedScoringBreakdown.final.length === 0) && (
+              <div className="bg-white/10 backdrop-blur-lg rounded-2xl p-8 border border-white/20 text-center">
+                <div className="text-6xl mb-4">📊</div>
+                <h3 className="text-2xl font-bold text-white mb-4">No Scoring Data Available</h3>
+                <p className="text-white/80 text-lg">
+                  Scoring tables will appear here once judges have submitted scores for heats, semifinal, or final phases.
+                </p>
+              </div>
+            )}
           </div>
         )}
 
@@ -1905,20 +2856,181 @@ export default function AdminDashboard({ user, onLogout }: AdminDashboardProps) 
               {/* Competition Phase */}
 
 
+              {/* Overall Heat Rankings */}
+              {adminData?.overallHeatRankings && (
+                <div className="mb-8">
+                  <h4 className="text-lg font-bold text-green-300 mb-4 flex items-center">
+                    <span className="mr-2">🏆</span>
+                    Top 8 Heat Rankings (Sum of All Heats)
+                  </h4>
+                  <p className="text-green-200 text-sm mb-4">
+                    These are the top 8 performers in each role based on total scores across all heats. 
+                    They would advance to the semifinal phase.
+                  </p>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    {/* Leaders */}
+                    <div>
+                      <h5 className="text-md font-bold text-blue-300 mb-3">🕺 Top 8 Leaders</h5>
+                      <div className="space-y-2">
+                        {adminData.overallHeatRankings.leaders.map((participant: any, index: number) => (
+                          <div key={participant.id} className="bg-gradient-to-r from-blue-500/20 to-blue-600/20 rounded-lg p-3 border border-blue-400/30">
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center space-x-3">
+                                <div className={`w-8 h-8 rounded-full flex items-center justify-center text-white font-bold text-sm ${
+                                  index === 0 ? 'bg-yellow-500' : 
+                                  index === 1 ? 'bg-gray-400' : 
+                                  index === 2 ? 'bg-orange-500' : 'bg-blue-500'
+                                }`}>
+                                  {index + 1}
+                                </div>
+                                <div>
+                                  <div className="font-bold text-white">{participant.name}</div>
+                                  <div className="text-blue-300 text-sm">#{participant.number}</div>
+                                </div>
+                              </div>
+                              <div className="text-right">
+                                <div className="text-yellow-300 font-bold text-lg">
+                                  {participant.totalScore}
+                                </div>
+                                <div className="text-blue-300 text-xs">
+                                  {participant.totalScores} scores
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                    
+                    {/* Followers */}
+                    <div>
+                      <h5 className="text-md font-bold text-pink-300 mb-3">💃 Top 8 Followers</h5>
+                      <div className="space-y-2">
+                        {adminData.overallHeatRankings.followers.map((participant: any, index: number) => (
+                          <div key={participant.id} className="bg-gradient-to-r from-pink-500/20 to-pink-600/20 rounded-lg p-3 border border-pink-400/30">
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center space-x-3">
+                                <div className={`w-8 h-8 rounded-full flex items-center justify-center text-white font-bold text-sm ${
+                                  index === 0 ? 'bg-yellow-500' : 
+                                  index === 1 ? 'bg-gray-400' : 
+                                  index === 2 ? 'bg-orange-500' : 'bg-pink-500'
+                                }`}>
+                                  {index + 1}
+                                </div>
+                                <div>
+                                  <div className="font-bold text-white">{participant.name}</div>
+                                  <div className="text-pink-300 text-sm">#{participant.number}</div>
+                                </div>
+                              </div>
+                              <div className="text-right">
+                                <div className="text-yellow-300 font-bold text-lg">
+                                  {participant.totalScore}
+                                </div>
+                                <div className="text-pink-300 text-xs">
+                                  {participant.totalScores} scores
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {/* Heat Results */}
               {adminData?.heatResults && adminData.heatResults.length > 0 && (
                 <div className="mb-8">
-                  <h4 className="text-lg font-bold text-green-300 mb-4">Heat Results</h4>
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  <h4 className="text-lg font-bold text-green-300 mb-4">Individual Heat Results</h4>
+                  <div className="space-y-6">
                     {adminData.heatResults.map((heat: any, index: number) => (
-                      <div key={index} className="bg-white/10 rounded-xl p-4 border border-white/20">
-                        <div className="text-center">
-                          <div className="text-lg font-bold text-white mb-2">Heat {index + 1}</div>
-                          <div className="text-sm text-white/60">
-                            {heat.participants?.length || 0} participants
+                      <div key={index} className="bg-white/10 rounded-xl p-6 border border-white/20">
+                        <div className="flex items-center justify-between mb-4">
+                          <h5 className="text-xl font-bold text-white">Heat {heat.number}</h5>
+                          <div className="flex items-center space-x-4">
+                            <div className="text-sm text-white/60">
+                              {heat.totalScores || 0} scores submitted
+                            </div>
+                            {heat.isActive ? (
+                              <div className="inline-flex items-center px-3 py-1 bg-green-500/30 rounded-full text-green-200 text-sm font-medium">
+                                <span className="w-2 h-2 bg-green-400 rounded-full mr-2"></span>
+                                Active
+                              </div>
+                            ) : (
+                              <button
+                                onClick={() => setActiveHeat(heat.id)}
+                                className="px-4 py-2 bg-gradient-to-r from-orange-400 to-red-500 text-white font-semibold rounded-lg hover:from-orange-500 hover:to-red-600 transition-all duration-300 transform hover:scale-105 shadow-lg"
+                              >
+                                🎯 Activate Heat
+                              </button>
+                            )}
                           </div>
-                          <div className="text-sm text-white/60 mt-1">
-                            {heat.totalScores || 0} scores submitted
+                        </div>
+                        
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                          {/* Leaders */}
+                          <div>
+                            <h6 className="text-md font-semibold text-blue-300 mb-3">🕺 Leaders</h6>
+                            <div className="space-y-2">
+                              {heat.participants
+                                .filter((p: any) => p.role === 'leader')
+                                .map((participant: any, participantIndex: number) => (
+                                  <div key={participant.id} className="bg-blue-500/10 rounded-lg p-3 border border-blue-400/30">
+                                    <div className="flex items-center justify-between mb-2">
+                                      <div className="flex items-center space-x-3">
+                                        <div className="w-8 h-8 bg-blue-500/50 rounded-full flex items-center justify-center text-white font-bold text-sm">
+                                          {participantIndex + 1}
+                                        </div>
+                                        <div>
+                                          <div className="font-semibold text-white">{participant.name}</div>
+                                          <div className="text-blue-300 text-sm">#{participant.number}</div>
+                                        </div>
+                                      </div>
+                                      <div className="text-right">
+                                        <div className="text-yellow-300 font-bold text-lg">
+                                          {participant.totalScore}
+                                        </div>
+                                        <div className="text-blue-300 text-xs">
+                                          {participant.totalScores} scores
+                                        </div>
+                                      </div>
+                                    </div>
+                                  </div>
+                                ))}
+                            </div>
+                          </div>
+                          
+                          {/* Followers */}
+                          <div>
+                            <h6 className="text-md font-semibold text-pink-300 mb-3">💃 Followers</h6>
+                            <div className="space-y-2">
+                              {heat.participants
+                                .filter((p: any) => p.role === 'follower')
+                                .map((participant: any, participantIndex: number) => (
+                                  <div key={participant.id} className="bg-pink-500/10 rounded-lg p-3 border border-pink-400/30">
+                                    <div className="flex items-center justify-between mb-2">
+                                      <div className="flex items-center space-x-3">
+                                        <div className="w-8 h-8 bg-pink-500/50 rounded-full flex items-center justify-center text-white font-bold text-sm">
+                                          {participantIndex + 1}
+                                        </div>
+                                        <div>
+                                          <div className="font-semibold text-white">{participant.name}</div>
+                                          <div className="text-pink-300 text-sm">#{participant.number}</div>
+                                        </div>
+                                      </div>
+                                      <div className="text-right">
+                                        <div className="text-yellow-300 font-bold text-lg">
+                                          {participant.totalScore}
+                                        </div>
+                                        <div className="text-pink-300 text-xs">
+                                          {participant.totalScores} scores
+                                        </div>
+                                      </div>
+                                    </div>
+                                  </div>
+                                ))}
+                            </div>
                           </div>
                         </div>
                       </div>
@@ -2107,6 +3219,263 @@ export default function AdminDashboard({ user, onLogout }: AdminDashboardProps) 
                       </div>
                     </div>
                   </div>
+                </div>
+              )}
+
+              {/* Detailed Scoring Breakdown */}
+              {adminData?.detailedScoringBreakdown && (
+                <div className="mb-8">
+                  <h4 className="text-lg font-bold text-purple-300 mb-4 flex items-center">
+                    <span className="mr-2">📊</span>
+                    Detailed Scoring Breakdown
+                  </h4>
+                  
+                  {/* Heat Scores */}
+                  {adminData.detailedScoringBreakdown.heats && adminData.detailedScoringBreakdown.heats.length > 0 && (
+                    <div className="mb-6">
+                      <h5 className="text-md font-bold text-green-300 mb-3">🔥 Heat Scores</h5>
+                      <div className="space-y-4">
+                        {adminData.detailedScoringBreakdown.heats.map((heat: any) => (
+                          <div key={heat.heatId} className="bg-white/10 rounded-xl p-4 border border-white/20">
+                            <h6 className="text-lg font-semibold text-white mb-3">Heat {heat.heatNumber}</h6>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                              {/* Leaders */}
+                              <div>
+                                <h6 className="text-sm font-semibold text-blue-300 mb-2">🕺 Leaders</h6>
+                                <div className="space-y-2">
+                                  {heat.participants
+                                    .filter((p: any) => p.role === 'leader')
+                                    .map((participant: any) => (
+                                      <div key={participant.id} className="bg-blue-500/10 rounded-lg p-3 border border-blue-400/30">
+                                        <div className="flex items-center justify-between mb-2">
+                                          <div>
+                                            <div className="font-semibold text-white">{participant.name}</div>
+                                            <div className="text-blue-300 text-sm">#{participant.number}</div>
+                                          </div>
+                                          <div className="text-right">
+                                            <div className="text-yellow-300 font-bold">
+                                              {participant.scores.reduce((sum: number, s: any) => sum + s.score, 0)}
+                                            </div>
+                                            <div className="text-blue-300 text-xs">{participant.scores.length} scores</div>
+                                          </div>
+                                        </div>
+                                        <div className="space-y-1">
+                                          {participant.scores.map((score: any, index: number) => (
+                                            <div key={index} className="flex items-center justify-between text-xs">
+                                              <div className="flex items-center space-x-2">
+                                                <span className={`w-2 h-2 rounded-full ${score.judgeRole === 'leader' ? 'bg-blue-400' : 'bg-pink-400'}`}></span>
+                                                <span className="text-white/80">{score.judgeName}</span>
+                                              </div>
+                                              <span className="text-yellow-300 font-semibold">{score.score}</span>
+                                            </div>
+                                          ))}
+                                        </div>
+                                      </div>
+                                    ))}
+                                </div>
+                              </div>
+                              
+                              {/* Followers */}
+                              <div>
+                                <h6 className="text-sm font-semibold text-pink-300 mb-2">💃 Followers</h6>
+                                <div className="space-y-2">
+                                  {heat.participants
+                                    .filter((p: any) => p.role === 'follower')
+                                    .map((participant: any) => (
+                                      <div key={participant.id} className="bg-pink-500/10 rounded-lg p-3 border border-pink-400/30">
+                                        <div className="flex items-center justify-between mb-2">
+                                          <div>
+                                            <div className="font-semibold text-white">{participant.name}</div>
+                                            <div className="text-pink-300 text-sm">#{participant.number}</div>
+                                          </div>
+                                          <div className="text-right">
+                                            <div className="text-yellow-300 font-bold">
+                                              {participant.scores.reduce((sum: number, s: any) => sum + s.score, 0)}
+                                            </div>
+                                            <div className="text-pink-300 text-xs">{participant.scores.length} scores</div>
+                                          </div>
+                                        </div>
+                                        <div className="space-y-1">
+                                          {participant.scores.map((score: any, index: number) => (
+                                            <div key={index} className="flex items-center justify-between text-xs">
+                                              <div className="flex items-center space-x-2">
+                                                <span className={`w-2 h-2 rounded-full ${score.judgeRole === 'leader' ? 'bg-blue-400' : 'bg-pink-400'}`}></span>
+                                                <span className="text-white/80">{score.judgeName}</span>
+                                              </div>
+                                              <span className="text-yellow-300 font-semibold">{score.score}</span>
+                                            </div>
+                                          ))}
+                                        </div>
+                                      </div>
+                                    ))}
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Semifinal Scores */}
+                  {adminData.detailedScoringBreakdown.semifinal && adminData.detailedScoringBreakdown.semifinal.length > 0 && (
+                    <div className="mb-6">
+                      <h5 className="text-md font-bold text-purple-300 mb-3">🥈 Semifinal Scores</h5>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        {/* Leaders */}
+                        <div>
+                          <h6 className="text-sm font-semibold text-blue-300 mb-2">🕺 Leaders</h6>
+                          <div className="space-y-2">
+                            {adminData.detailedScoringBreakdown.semifinal
+                              .filter((p: any) => p.role === 'leader')
+                              .map((participant: any) => (
+                                <div key={participant.id} className="bg-purple-500/10 rounded-lg p-3 border border-purple-400/30">
+                                  <div className="flex items-center justify-between mb-2">
+                                    <div>
+                                      <div className="font-semibold text-white">{participant.name}</div>
+                                      <div className="text-blue-300 text-sm">#{participant.number}</div>
+                                    </div>
+                                    <div className="text-right">
+                                      <div className="text-yellow-300 font-bold">
+                                        {participant.scores.reduce((sum: number, s: any) => sum + s.score, 0)}
+                                      </div>
+                                      <div className="text-purple-300 text-xs">{participant.scores.length} scores</div>
+                                    </div>
+                                  </div>
+                                  <div className="space-y-1">
+                                    {participant.scores.map((score: any, index: number) => (
+                                      <div key={index} className="flex items-center justify-between text-xs">
+                                        <div className="flex items-center space-x-2">
+                                          <span className={`w-2 h-2 rounded-full ${score.judgeRole === 'leader' ? 'bg-blue-400' : 'bg-pink-400'}`}></span>
+                                          <span className="text-white/80">{score.judgeName}</span>
+                                        </div>
+                                        <span className="text-yellow-300 font-semibold">{score.score}</span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              ))}
+                          </div>
+                        </div>
+                        
+                        {/* Followers */}
+                        <div>
+                          <h6 className="text-sm font-semibold text-pink-300 mb-2">💃 Followers</h6>
+                          <div className="space-y-2">
+                            {adminData.detailedScoringBreakdown.semifinal
+                              .filter((p: any) => p.role === 'follower')
+                              .map((participant: any) => (
+                                <div key={participant.id} className="bg-purple-500/10 rounded-lg p-3 border border-purple-400/30">
+                                  <div className="flex items-center justify-between mb-2">
+                                    <div>
+                                      <div className="font-semibold text-white">{participant.name}</div>
+                                      <div className="text-pink-300 text-sm">#{participant.number}</div>
+                                    </div>
+                                    <div className="text-right">
+                                      <div className="text-yellow-300 font-bold">
+                                        {participant.scores.reduce((sum: number, s: any) => sum + s.score, 0)}
+                                      </div>
+                                      <div className="text-purple-300 text-xs">{participant.scores.length} scores</div>
+                                    </div>
+                                  </div>
+                                  <div className="space-y-1">
+                                    {participant.scores.map((score: any, index: number) => (
+                                      <div key={index} className="flex items-center justify-between text-xs">
+                                        <div className="flex items-center space-x-2">
+                                          <span className={`w-2 h-2 rounded-full ${score.judgeRole === 'leader' ? 'bg-blue-400' : 'bg-pink-400'}`}></span>
+                                          <span className="text-white/80">{score.judgeName}</span>
+                                        </div>
+                                        <span className="text-yellow-300 font-semibold">{score.score}</span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              ))}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Final Scores */}
+                  {adminData.detailedScoringBreakdown.final && adminData.detailedScoringBreakdown.final.length > 0 && (
+                    <div className="mb-6">
+                      <h5 className="text-md font-bold text-orange-300 mb-3">🏆 Final Scores</h5>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        {/* Leaders */}
+                        <div>
+                          <h6 className="text-sm font-semibold text-blue-300 mb-2">🕺 Leaders</h6>
+                          <div className="space-y-2">
+                            {adminData.detailedScoringBreakdown.final
+                              .filter((p: any) => p.role === 'leader')
+                              .map((participant: any) => (
+                                <div key={participant.id} className="bg-orange-500/10 rounded-lg p-3 border border-orange-400/30">
+                                  <div className="flex items-center justify-between mb-2">
+                                    <div>
+                                      <div className="font-semibold text-white">{participant.name}</div>
+                                      <div className="text-blue-300 text-sm">#{participant.number}</div>
+                                    </div>
+                                    <div className="text-right">
+                                      <div className="text-yellow-300 font-bold">
+                                        {participant.scores.reduce((sum: number, s: any) => sum + s.score, 0)}
+                                      </div>
+                                      <div className="text-orange-300 text-xs">{participant.scores.length} scores</div>
+                                    </div>
+                                  </div>
+                                  <div className="space-y-1">
+                                    {participant.scores.map((score: any, index: number) => (
+                                      <div key={index} className="flex items-center justify-between text-xs">
+                                        <div className="flex items-center space-x-2">
+                                          <span className={`w-2 h-2 rounded-full ${score.judgeRole === 'leader' ? 'bg-blue-400' : 'bg-pink-400'}`}></span>
+                                          <span className="text-white/80">{score.judgeName}</span>
+                                        </div>
+                                        <span className="text-yellow-300 font-semibold">{score.score}</span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              ))}
+                          </div>
+                        </div>
+                        
+                        {/* Followers */}
+                        <div>
+                          <h6 className="text-sm font-semibold text-pink-300 mb-2">💃 Followers</h6>
+                          <div className="space-y-2">
+                            {adminData.detailedScoringBreakdown.final
+                              .filter((p: any) => p.role === 'follower')
+                              .map((participant: any) => (
+                                <div key={participant.id} className="bg-orange-500/10 rounded-lg p-3 border border-orange-400/30">
+                                  <div className="flex items-center justify-between mb-2">
+                                    <div>
+                                      <div className="font-semibold text-white">{participant.name}</div>
+                                      <div className="text-pink-300 text-sm">#{participant.number}</div>
+                                    </div>
+                                    <div className="text-right">
+                                      <div className="text-yellow-300 font-bold">
+                                        {participant.scores.reduce((sum: number, s: any) => sum + s.score, 0)}
+                                      </div>
+                                      <div className="text-orange-300 text-xs">{participant.scores.length} scores</div>
+                                    </div>
+                                  </div>
+                                  <div className="space-y-1">
+                                    {participant.scores.map((score: any, index: number) => (
+                                      <div key={index} className="flex items-center justify-between text-xs">
+                                        <div className="flex items-center space-x-2">
+                                          <span className={`w-2 h-2 rounded-full ${score.judgeRole === 'leader' ? 'bg-blue-400' : 'bg-pink-400'}`}></span>
+                                          <span className="text-white/80">{score.judgeName}</span>
+                                        </div>
+                                        <span className="text-yellow-300 font-semibold">{score.score}</span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              ))}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
             </div>

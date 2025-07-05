@@ -31,7 +31,8 @@
     "react-dom": "^18",
     "tailwindcss": "^3.3.0",
     "typescript": "^5",
-    "uuid": "^9.0.1"
+    "uuid": "^9.0.1",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@types/node": "^24.0.8",

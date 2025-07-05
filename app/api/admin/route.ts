@@ -42,11 +42,11 @@ export async function GET() {
     });
     
     // Get participants by role
-    const leaders = await prisma.participant.count({
+    const leaderCount = await prisma.participant.count({
       where: { role: 'LEADER' }
     });
     
-    const followers = await prisma.participant.count({
+    const followerCount = await prisma.participant.count({
       where: { role: 'FOLLOWER' }
     });
 
@@ -127,14 +127,231 @@ export async function GET() {
         totalScores: scores.length
       };
     });
+
+    // Calculate overall heat rankings (sum of all heats)
+    const overallHeatRankings: any = {
+      leaders: [],
+      followers: []
+    };
+
+    // Get all participants
+    const allParticipants = await prisma.participant.findMany();
+    
+    // Calculate total scores across all heats for each participant
+    const participantTotalScores = new Map<string, number>();
+    const participantScoreCounts = new Map<string, number>();
+
+    // Initialize all participants with 0 scores
+    allParticipants.forEach(p => {
+      participantTotalScores.set(p.id, 0);
+      participantScoreCounts.set(p.id, 0);
+    });
+
+    // Sum up all scores for each participant across all heats
+    heats.forEach(heat => {
+      heat.scores.forEach(score => {
+        const currentScore = participantTotalScores.get(score.participantId) || 0;
+        const currentCount = participantScoreCounts.get(score.participantId) || 0;
+        participantTotalScores.set(score.participantId, currentScore + score.score);
+        participantScoreCounts.set(score.participantId, currentCount + 1);
+      });
+    });
+
+    // Create rankings for leaders and followers - Top 8 only
+    const leaders = allParticipants
+      .filter(p => p.role === 'LEADER')
+      .map(p => ({
+        ...p,
+        role: p.role.toLowerCase(),
+        totalScore: participantTotalScores.get(p.id) || 0,
+        totalScores: participantScoreCounts.get(p.id) || 0
+      }))
+      .sort((a, b) => b.totalScore - a.totalScore)
+      .slice(0, 8); // Top 8 only
+
+    const followers = allParticipants
+      .filter(p => p.role === 'FOLLOWER')
+      .map(p => ({
+        ...p,
+        role: p.role.toLowerCase(),
+        totalScore: participantTotalScores.get(p.id) || 0,
+        totalScores: participantScoreCounts.get(p.id) || 0
+      }))
+      .sort((a, b) => b.totalScore - a.totalScore)
+      .slice(0, 8); // Top 8 only
+
+    overallHeatRankings.leaders = leaders;
+    overallHeatRankings.followers = followers;
+
+    // Get scores for semifinalists and finalists
+    let semifinalistsWithScores = [];
+    let finalistsWithScores = [];
+
+    if (competitionState) {
+      const semifinalists = JSON.parse(competitionState.semifinalists);
+      const finalists = JSON.parse(competitionState.finalists);
+
+      if (semifinalists.length > 0) {
+        const semifinalistIds = semifinalists.map((p: any) => p.id);
+        const semifinalScores = await prisma.score.findMany({
+          where: {
+            participantId: { in: semifinalistIds },
+            phase: 'SEMIFINAL'
+          },
+          include: {
+            judge: true,
+            participant: true
+          }
+        });
+
+        semifinalistsWithScores = semifinalists.map((participant: any) => {
+          const participantScores = semifinalScores.filter(s => s.participantId === participant.id);
+          const totalScore = participantScores.reduce((sum, s) => sum + s.score, 0);
+          
+          return {
+            ...participant,
+            totalScore: totalScore,
+            totalScores: participantScores.length,
+            detailedScores: participantScores.map(s => ({
+              judgeName: s.judge.name,
+              judgeRole: s.judge.role.toLowerCase(),
+              score: s.score,
+              timestamp: s.timestamp
+            }))
+          };
+        });
+      }
+
+      if (finalists.length > 0) {
+        const finalistIds = finalists.map((p: any) => p.id);
+        const finalScores = await prisma.score.findMany({
+          where: {
+            participantId: { in: finalistIds },
+            phase: 'FINAL'
+          },
+          include: {
+            judge: true,
+            participant: true
+          }
+        });
+
+        finalistsWithScores = finalists.map((participant: any) => {
+          const participantScores = finalScores.filter(s => s.participantId === participant.id);
+          const totalScore = participantScores.reduce((sum, s) => sum + s.score, 0);
+          
+          return {
+            ...participant,
+            totalScore: totalScore,
+            totalScores: participantScores.length,
+            detailedScores: participantScores.map(s => ({
+              judgeName: s.judge.name,
+              judgeRole: s.judge.role.toLowerCase(),
+              score: s.score,
+              timestamp: s.timestamp
+            }))
+          };
+        });
+      }
+    }
+
+    // Get detailed scoring breakdown for all phases
+    const detailedScoringBreakdown: any = {
+      heats: [],
+      semifinal: [],
+      final: []
+    };
+
+    // Get all scores with judge and participant details
+    const allScores = await prisma.score.findMany({
+      include: {
+        judge: true,
+        participant: true,
+        heat: true
+      },
+      orderBy: [
+        { phase: 'asc' },
+        { heatId: 'asc' },
+        { participantId: 'asc' }
+      ]
+    });
+
+    // Group scores by phase and heat
+    const scoresByPhase: any = allScores.reduce((acc: any, score) => {
+      const phase = score.phase.toLowerCase();
+      if (!acc[phase]) {
+        acc[phase] = {};
+      }
+      
+      if (phase === 'heats') {
+        const heatId = score.heatId || 'unknown';
+        if (!acc[phase][heatId]) {
+          acc[phase][heatId] = {
+            heatNumber: score.heat?.number || 'Unknown',
+            participants: {}
+          };
+        }
+        
+        const participantId = score.participantId;
+        if (!acc[phase][heatId].participants[participantId]) {
+          acc[phase][heatId].participants[participantId] = {
+            id: score.participant.id,
+            name: score.participant.name,
+            number: score.participant.number,
+            role: score.participant.role.toLowerCase(),
+            scores: []
+          };
+        }
+        
+        acc[phase][heatId].participants[participantId].scores.push({
+          judgeName: score.judge.name,
+          judgeRole: score.judge.role.toLowerCase(),
+          score: score.score,
+          timestamp: score.timestamp
+        });
+      } else {
+        // For semifinal and final phases
+        const participantId = score.participantId;
+        if (!acc[phase][participantId]) {
+          acc[phase][participantId] = {
+            id: score.participant.id,
+            name: score.participant.name,
+            number: score.participant.number,
+            role: score.participant.role.toLowerCase(),
+            scores: []
+          };
+        }
+        
+        acc[phase][participantId].scores.push({
+          judgeName: score.judge.name,
+          judgeRole: score.judge.role.toLowerCase(),
+          score: score.score,
+          timestamp: score.timestamp
+        });
+      }
+      
+      return acc;
+    }, {});
+
+    // Convert to array format for easier frontend consumption
+    Object.keys(scoresByPhase).forEach(phase => {
+      if (phase === 'heats') {
+        detailedScoringBreakdown.heats = Object.keys(scoresByPhase[phase]).map(heatId => ({
+          heatId,
+          heatNumber: scoresByPhase[phase][heatId].heatNumber,
+          participants: Object.values(scoresByPhase[phase][heatId].participants)
+        }));
+      } else {
+        detailedScoringBreakdown[phase] = Object.values(scoresByPhase[phase]);
+      }
+    });
     
     return NextResponse.json({
       stats: {
         participants: participantCount,
         judges: judgeCount,
         heats: heatCount,
-        leaders,
-        followers
+        leaders: leaderCount,
+        followers: followerCount
       },
       competitionState: competitionState ? {
         currentPhase: competitionState.currentPhase.toLowerCase(),
@@ -148,12 +365,14 @@ export async function GET() {
             role: hp.participant.role.toLowerCase()
           }))
         } : null,
-        semifinalists: JSON.parse(competitionState.semifinalists),
-        finalists: JSON.parse(competitionState.finalists),
+        semifinalists: semifinalistsWithScores.length > 0 ? semifinalistsWithScores : JSON.parse(competitionState.semifinalists),
+        finalists: finalistsWithScores.length > 0 ? finalistsWithScores : JSON.parse(competitionState.finalists),
         winners: JSON.parse(competitionState.winners)
       } : null,
       judgeScoringStatus,
-      heatResults
+      heatResults,
+      detailedScoringBreakdown,
+      overallHeatRankings
     });
   } catch (error) {
     return NextResponse.json({ error: 'Failed to fetch admin data' }, { status: 500 });
@@ -387,15 +606,103 @@ async function advanceToSemifinal(category: 'AMATEUR' | 'PRO' = 'AMATEUR') {
       });
     });
 
-    // Get top 8 leaders and top 8 followers by SUM of scores
+    // Calculate judge satisfaction metrics for each participant
+    const participantJudgeMetrics = new Map<string, { judgeCount: number, averageScore: number, highScoreCount: number }>();
+    allParticipants.forEach(p => {
+      participantJudgeMetrics.set(p.id, { judgeCount: 0, averageScore: 0, highScoreCount: 0 });
+    });
+
+    // Calculate metrics per participant across all heats
+    heats.forEach(heat => {
+      heat.participants.forEach(hp => {
+        const participantScores = heat.scores.filter(s => s.participantId === hp.participantId);
+        const uniqueJudges = new Set(participantScores.map(s => s.judgeId));
+        const currentMetrics = participantJudgeMetrics.get(hp.participantId) || { judgeCount: 0, averageScore: 0, highScoreCount: 0 };
+        
+        // Count unique judges
+        currentMetrics.judgeCount += uniqueJudges.size;
+        
+        // Calculate average score for this heat
+        if (participantScores.length > 0) {
+          const heatAverage = participantScores.reduce((sum, s) => sum + s.score, 0) / participantScores.length;
+          currentMetrics.averageScore = (currentMetrics.averageScore + heatAverage) / 2; // Running average
+        }
+        
+        // Count high scores (8+ points)
+        const highScores = participantScores.filter(s => s.score >= 8).length;
+        currentMetrics.highScoreCount += highScores;
+        
+        participantJudgeMetrics.set(hp.participantId, currentMetrics);
+      });
+    });
+
+    // Get top 8 leaders and top 8 followers with enhanced tie-breaking
     const leaders = allParticipants
-      .filter(p => (p.role === 'LEADER' || p.role === 'FOLLOWER'))
-      .sort((a, b) => (participantScores.get(b.id) || 0) - (participantScores.get(a.id) || 0))
+      .filter(p => p.role === 'LEADER')
+      .map(p => {
+        const metrics = participantJudgeMetrics.get(p.id) || { judgeCount: 0, averageScore: 0, highScoreCount: 0 };
+        return {
+          ...p,
+          totalScore: participantScores.get(p.id) || 0,
+          judgeCount: metrics.judgeCount,
+          averageScore: metrics.averageScore,
+          highScoreCount: metrics.highScoreCount
+        };
+      })
+      .sort((a, b) => {
+        // Primary: Total score (highest first)
+        if (b.totalScore !== a.totalScore) {
+          return b.totalScore - a.totalScore;
+        }
+        // Secondary: Average score (highest first) - measures judge satisfaction
+        if (b.averageScore !== a.averageScore) {
+          return b.averageScore - a.averageScore;
+        }
+        // Tertiary: Number of high scores (8+) - measures consistent excellence
+        if (b.highScoreCount !== a.highScoreCount) {
+          return b.highScoreCount - a.highScoreCount;
+        }
+        // Quaternary: Number of judges (highest first)
+        if (b.judgeCount !== a.judgeCount) {
+          return b.judgeCount - a.judgeCount;
+        }
+        // Quinary: Random selection for complete ties
+        return Math.random() - 0.5;
+      })
       .slice(0, 8);
 
     const followers = allParticipants
       .filter(p => p.role === 'FOLLOWER')
-      .sort((a, b) => (participantScores.get(b.id) || 0) - (participantScores.get(a.id) || 0))
+      .map(p => {
+        const metrics = participantJudgeMetrics.get(p.id) || { judgeCount: 0, averageScore: 0, highScoreCount: 0 };
+        return {
+          ...p,
+          totalScore: participantScores.get(p.id) || 0,
+          judgeCount: metrics.judgeCount,
+          averageScore: metrics.averageScore,
+          highScoreCount: metrics.highScoreCount
+        };
+      })
+      .sort((a, b) => {
+        // Primary: Total score (highest first)
+        if (b.totalScore !== a.totalScore) {
+          return b.totalScore - a.totalScore;
+        }
+        // Secondary: Average score (highest first) - measures judge satisfaction
+        if (b.averageScore !== a.averageScore) {
+          return b.averageScore - a.averageScore;
+        }
+        // Tertiary: Number of high scores (8+) - measures consistent excellence
+        if (b.highScoreCount !== a.highScoreCount) {
+          return b.highScoreCount - a.highScoreCount;
+        }
+        // Quaternary: Number of judges (highest first)
+        if (b.judgeCount !== a.judgeCount) {
+          return b.judgeCount - a.judgeCount;
+        }
+        // Quinary: Random selection for complete ties
+        return Math.random() - 0.5;
+      })
       .slice(0, 8);
 
     const semifinalists = [...leaders, ...followers];
@@ -465,15 +772,94 @@ async function advanceToFinal() {
       participantScores.set(score.participantId, currentScore + score.score);
     });
 
-    // Get top 5 leaders and top 5 followers by SUM of scores
+    // Calculate judge satisfaction metrics for each semifinalist
+    const semifinalistMetrics = new Map<string, { judgeCount: number, averageScore: number, highScoreCount: number }>();
+    semifinalists.forEach((p: any) => {
+      semifinalistMetrics.set(p.id, { judgeCount: 0, averageScore: 0, highScoreCount: 0 });
+    });
+
+    // Calculate metrics per semifinalist
+    semifinalists.forEach((p: any) => {
+      const participantScores = semifinalScores.filter(s => s.participantId === p.id);
+      const uniqueJudges = new Set(participantScores.map(s => s.judgeId));
+      const metrics = semifinalistMetrics.get(p.id)!;
+      
+      metrics.judgeCount = uniqueJudges.size;
+      
+      if (participantScores.length > 0) {
+        metrics.averageScore = participantScores.reduce((sum, s) => sum + s.score, 0) / participantScores.length;
+      }
+      
+      metrics.highScoreCount = participantScores.filter(s => s.score >= 8).length;
+    });
+
+    // Get top 5 leaders and top 5 followers with enhanced tie-breaking
     const leaders = semifinalists
       .filter((p: any) => (p.role === 'leader' || p.role === 'LEADER'))
-      .sort((a: any, b: any) => (participantScores.get(b.id) || 0) - (participantScores.get(a.id) || 0))
+      .map((p: any) => {
+        const metrics = semifinalistMetrics.get(p.id) || { judgeCount: 0, averageScore: 0, highScoreCount: 0 };
+        return {
+          ...p,
+          totalScore: participantScores.get(p.id) || 0,
+          judgeCount: metrics.judgeCount,
+          averageScore: metrics.averageScore,
+          highScoreCount: metrics.highScoreCount
+        };
+      })
+      .sort((a: any, b: any) => {
+        // Primary: Total score (highest first)
+        if (b.totalScore !== a.totalScore) {
+          return b.totalScore - a.totalScore;
+        }
+        // Secondary: Average score (highest first) - measures judge satisfaction
+        if (b.averageScore !== a.averageScore) {
+          return b.averageScore - a.averageScore;
+        }
+        // Tertiary: Number of high scores (8+) - measures consistent excellence
+        if (b.highScoreCount !== a.highScoreCount) {
+          return b.highScoreCount - a.highScoreCount;
+        }
+        // Quaternary: Number of judges (highest first)
+        if (b.judgeCount !== a.judgeCount) {
+          return b.judgeCount - a.judgeCount;
+        }
+        // Quinary: Random selection for complete ties
+        return Math.random() - 0.5;
+      })
       .slice(0, 5);
 
     const followers = semifinalists
       .filter((p: any) => (p.role === 'follower' || p.role === 'FOLLOWER'))
-      .sort((a: any, b: any) => (participantScores.get(b.id) || 0) - (participantScores.get(a.id) || 0))
+      .map((p: any) => {
+        const metrics = semifinalistMetrics.get(p.id) || { judgeCount: 0, averageScore: 0, highScoreCount: 0 };
+        return {
+          ...p,
+          totalScore: participantScores.get(p.id) || 0,
+          judgeCount: metrics.judgeCount,
+          averageScore: metrics.averageScore,
+          highScoreCount: metrics.highScoreCount
+        };
+      })
+      .sort((a: any, b: any) => {
+        // Primary: Total score (highest first)
+        if (b.totalScore !== a.totalScore) {
+          return b.totalScore - a.totalScore;
+        }
+        // Secondary: Average score (highest first) - measures judge satisfaction
+        if (b.averageScore !== a.averageScore) {
+          return b.averageScore - a.averageScore;
+        }
+        // Tertiary: Number of high scores (8+) - measures consistent excellence
+        if (b.highScoreCount !== a.highScoreCount) {
+          return b.highScoreCount - a.highScoreCount;
+        }
+        // Quaternary: Number of judges (highest first)
+        if (b.judgeCount !== a.judgeCount) {
+          return b.judgeCount - a.judgeCount;
+        }
+        // Quinary: Random selection for complete ties
+        return Math.random() - 0.5;
+      })
       .slice(0, 5);
 
     const finalists = [...leaders, ...followers];
@@ -549,15 +935,94 @@ async function determineWinners() {
       participantScores.set(score.participantId, currentScore + score.score);
     });
 
-    // Get top 3 leaders and top 3 followers by SUM of scores
+    // Calculate judge satisfaction metrics for each finalist
+    const finalistMetrics = new Map<string, { judgeCount: number, averageScore: number, highScoreCount: number }>();
+    finalists.forEach((p: any) => {
+      finalistMetrics.set(p.id, { judgeCount: 0, averageScore: 0, highScoreCount: 0 });
+    });
+
+    // Calculate metrics per finalist
+    finalists.forEach((p: any) => {
+      const participantScores = finalScores.filter(s => s.participantId === p.id);
+      const uniqueJudges = new Set(participantScores.map(s => s.judgeId));
+      const metrics = finalistMetrics.get(p.id)!;
+      
+      metrics.judgeCount = uniqueJudges.size;
+      
+      if (participantScores.length > 0) {
+        metrics.averageScore = participantScores.reduce((sum, s) => sum + s.score, 0) / participantScores.length;
+      }
+      
+      metrics.highScoreCount = participantScores.filter(s => s.score >= 8).length;
+    });
+
+    // Get top 3 leaders and top 3 followers with enhanced tie-breaking
     const leaders = finalists
       .filter((p: any) => (p.role === 'leader' || p.role === 'LEADER'))
-      .sort((a: any, b: any) => (participantScores.get(b.id) || 0) - (participantScores.get(a.id) || 0))
+      .map((p: any) => {
+        const metrics = finalistMetrics.get(p.id) || { judgeCount: 0, averageScore: 0, highScoreCount: 0 };
+        return {
+          ...p,
+          totalScore: participantScores.get(p.id) || 0,
+          judgeCount: metrics.judgeCount,
+          averageScore: metrics.averageScore,
+          highScoreCount: metrics.highScoreCount
+        };
+      })
+      .sort((a: any, b: any) => {
+        // Primary: Total score (highest first)
+        if (b.totalScore !== a.totalScore) {
+          return b.totalScore - a.totalScore;
+        }
+        // Secondary: Average score (highest first) - measures judge satisfaction
+        if (b.averageScore !== a.averageScore) {
+          return b.averageScore - a.averageScore;
+        }
+        // Tertiary: Number of high scores (8+) - measures consistent excellence
+        if (b.highScoreCount !== a.highScoreCount) {
+          return b.highScoreCount - a.highScoreCount;
+        }
+        // Quaternary: Number of judges (highest first)
+        if (b.judgeCount !== a.judgeCount) {
+          return b.judgeCount - a.judgeCount;
+        }
+        // Quinary: Random selection for complete ties
+        return Math.random() - 0.5;
+      })
       .slice(0, 3);
 
     const followers = finalists
       .filter((p: any) => (p.role === 'follower' || p.role === 'FOLLOWER'))
-      .sort((a: any, b: any) => (participantScores.get(b.id) || 0) - (participantScores.get(a.id) || 0))
+      .map((p: any) => {
+        const metrics = finalistMetrics.get(p.id) || { judgeCount: 0, averageScore: 0, highScoreCount: 0 };
+        return {
+          ...p,
+          totalScore: participantScores.get(p.id) || 0,
+          judgeCount: metrics.judgeCount,
+          averageScore: metrics.averageScore,
+          highScoreCount: metrics.highScoreCount
+        };
+      })
+      .sort((a: any, b: any) => {
+        // Primary: Total score (highest first)
+        if (b.totalScore !== a.totalScore) {
+          return b.totalScore - a.totalScore;
+        }
+        // Secondary: Average score (highest first) - measures judge satisfaction
+        if (b.averageScore !== a.averageScore) {
+          return b.averageScore - a.averageScore;
+        }
+        // Tertiary: Number of high scores (8+) - measures consistent excellence
+        if (b.highScoreCount !== a.highScoreCount) {
+          return b.highScoreCount - a.highScoreCount;
+        }
+        // Quaternary: Number of judges (highest first)
+        if (b.judgeCount !== a.judgeCount) {
+          return b.judgeCount - a.judgeCount;
+        }
+        // Quinary: Random selection for complete ties
+        return Math.random() - 0.5;
+      })
       .slice(0, 3);
 
     const winners = {
