@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import prisma from '../../../../lib/prisma';
+import { prisma } from '../../../../lib/prisma';
 
 // GET /api/judges/scoring - Get scoring data for a judge
 export async function GET(req: NextRequest) {

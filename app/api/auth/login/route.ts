@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import prisma from '../../../../lib/prisma';
+import { prisma } from '../../../../lib/prisma';
 
 // POST /api/auth/login
 export async function POST(req: NextRequest) {
@@ -10,11 +10,6 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Database configuration error' }, { status: 503 });
     }
 
-    // Check if Prisma is properly initialized
-    if (!prisma.user) {
-      return NextResponse.json({ error: 'Database not available' }, { status: 503 });
-    }
-
     const data = await req.json();
     const { username, password } = data;
     
@@ -22,10 +17,16 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Missing username or password' }, { status: 400 });
     }
     
-    // Find user by username
-    const user = await prisma.user.findUnique({
-      where: { username }
-    });
+    // Find user by username with error handling
+    let user;
+    try {
+      user = await prisma.user.findUnique({
+        where: { username }
+      });
+    } catch (dbError) {
+      console.error('Database error during login:', dbError);
+      return NextResponse.json({ error: 'Database connection error' }, { status: 503 });
+    }
     
     if (!user) {
       return NextResponse.json({ error: 'Invalid username or password' }, { status: 401 });
